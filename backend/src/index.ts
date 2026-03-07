@@ -35,17 +35,32 @@ app.get('/api/debug', async (req, res) => {
             instantlyService.getAccounts(),
             instantlyService.getCampaigns()
         ]);
-        const campaignTags = await instantlyService.getTags('campaign');
+        const customTags = await instantlyService.getTags('campaign');
+
+        // Build tag map
+        const tagMap: Record<string, string> = {};
+        customTags.forEach((t: any) => { if (t.id && t.label) tagMap[t.id] = t.label; });
+
         res.json({
+            apiVersion: '2.0-fixed',
             accountsCount: accounts.length,
             campaignsCount: campaigns.length,
+            customTagsCount: customTags.length,
+            tagMap,
             sampleCampaign: campaigns.length > 0 ? campaigns[0] : null,
-            allCampaignTags: campaignTags,
-            rawCampaigns: campaigns
+            sampleAccount: accounts.length > 0 ? accounts[0] : null,
+            allCampaigns: campaigns.map((c: any) => ({
+                id: c.id,
+                name: c.name,
+                status: c.status,
+                tags: c.tags,
+                email_tag_list: c.email_tag_list,
+                tag_ids: c.tag_ids
+            }))
         });
     } catch (error: any) {
         console.error('Debug error:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: error.message, stack: error.stack?.split('\n').slice(0, 3) });
     }
 });
 

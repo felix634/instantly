@@ -4,7 +4,7 @@ import { dbService } from '../services/supabase.service.js';
 
 const router = Router();
 
-// Temporary log helper to fix lint error after moving debug route
+// Log helper
 const log = (data: any) => {
     console.log(JSON.stringify({ timestamp: new Date().toISOString(), ...data }));
 };
@@ -16,44 +16,94 @@ router.get('/', async (req, res) => {
             return res.status(400).json({ error: 'Valid user parameter (felix or arpi) is required' });
         }
 
-        const userTag = user === 'felix' ? 'Félix manageli' : 'Árpi manageli';
+        const userTagLabel = user === 'felix' ? 'Félix manageli' : 'Árpi manageli';
 
-        // 1. Fetch data from Instantly
-        const [allAccounts, allCampaigns] = await Promise.all([
+        // 1. Fetch data from Instantly (all in parallel)
+        const [allAccounts, allCampaigns, allTags] = await Promise.all([
             instantlyService.getAccounts(),
-            instantlyService.getCampaigns()
+            instantlyService.getCampaigns(),
+            instantlyService.getTags('campaign')
         ]);
 
-        // Helper to check if a resource has a specific tag
-        const hasTag = (resource: any, targetTag: string) => {
-            if (!resource.tags) return false;
-            return resource.tags.some((t: any) => {
-                const label = typeof t === 'string' ? t : (t.label || t.name || '');
-                return label.toLowerCase() === targetTag.toLowerCase();
-            });
-        };
+        // 2. Build a tag UUID → label map
+        const tagMap = new Map<string, string>();
+        allTags.forEach((tag: any) => {
+            if (tag.id && tag.label) {
+                tagMap.set(tag.id, tag.label);
+            }
+        });
 
-        // 2. Filter campaigns by user tag
-        const filteredCampaigns = allCampaigns.filter(c => hasTag(c, userTag));
-        const campaignIds = filteredCampaigns.map(c => c.id);
+        // Find the UUID of the user's tag
+        const userTagId = allTags.find((tag: any) =>
+            tag.label && tag.label.toLowerCase() === userTagLabel.toLowerCase()
+        )?.id;
 
-        // Filter accounts by user tag
-        const filteredAccounts = allAccounts.filter(acc => hasTag(acc, userTag));
+        log({
+            user, userTagLabel, userTagId,
+            totalCampaigns: allCampaigns.length,
+            totalAccounts: allAccounts.length,
+            totalTags: allTags.length,
+            tagLabels: allTags.map((t: any) => t.label)
+        });
 
-        log({ user, userTag, campaignsTotal: allCampaigns.length, accountsTotal: allAccounts.length, filteredCampaignsCount: filteredCampaigns.length, filteredAccountsCount: filteredAccounts.length });
+        // 3. Filter campaigns by user tag
+        // Campaign tags can be: UUID strings in email_tag_list, or string labels in tags array
+        const filteredCampaigns = allCampaigns.filter((c: any) => {
+            // Check email_tag_list (array of UUIDs)
+            if (c.email_tag_list && Array.isArray(c.email_tag_list) && userTagId) {
+                if (c.email_tag_list.includes(userTagId)) return true;
+            }
+            // Check tags field (could be labels or objects)
+            if (c.tags && Array.isArray(c.tags)) {
+                return c.tags.some((t: any) => {
+                    const label = typeof t === 'string' ? (tagMap.get(t) || t) : (t.label || t.name || '');
+                    return label.toLowerCase() === userTagLabel.toLowerCase();
+                });
+            }
+            // Check tag_ids field 
+            if (c.tag_ids && Array.isArray(c.tag_ids) && userTagId) {
+                if (c.tag_ids.includes(userTagId)) return true;
+            }
+            return false;
+        });
 
-        // Fetch analytics for each campaign
-        const analyticsPromises = campaignIds.map(id => instantlyService.getCampaignAnalytics(id));
+        const campaignIds = filteredCampaigns.map((c: any) => c.id);
+
+        // Filter accounts by similar logic
+        const filteredAccounts = allAccounts.filter((acc: any) => {
+            if (acc.email_tag_list && Array.isArray(acc.email_tag_list) && userTagId) {
+                return acc.email_tag_list.includes(userTagId);
+            }
+            if (acc.tags && Array.isArray(acc.tags)) {
+                return acc.tags.some((t: any) => {
+                    const label = typeof t === 'string' ? (tagMap.get(t) || t) : (t.label || t.name || '');
+                    return label.toLowerCase() === userTagLabel.toLowerCase();
+                });
+            }
+            if (acc.tag_ids && Array.isArray(acc.tag_ids) && userTagId) {
+                return acc.tag_ids.includes(userTagId);
+            }
+            return false;
+        });
+
+        log({ filteredCampaigns: filteredCampaigns.length, filteredAccounts: filteredAccounts.length });
+
+        // 4. Fetch analytics for each campaign
+        const analyticsPromises = campaignIds.map((id: string) =>
+            instantlyService.getCampaignAnalytics(id).catch(err => {
+                console.error(`Failed to get analytics for campaign ${id}:`, err.message);
+                return [];
+            })
+        );
         const allCampaignAnalytics = await Promise.all(analyticsPromises);
 
-        // Aggregate data (Daily sends = sum of latest daily stats for these campaigns)
+        // 5. Aggregate data
         let totalSends = 0;
         let totalBounces = 0;
         let totalReplies = 0;
 
-        const campaignsWithStats = filteredCampaigns.map((c, index) => {
+        const campaignsWithStats = filteredCampaigns.map((c: any, index: number) => {
             const stats = allCampaignAnalytics[index];
-            // Get latest day stats
             const latestDay = stats && stats.length > 0 ? stats[stats.length - 1] : { sent: 0, bounced: 0, replied: 0 };
 
             totalSends += latestDay.sent || 0;
@@ -64,16 +114,15 @@ router.get('/', async (req, res) => {
                 id: c.id,
                 name: c.name,
                 status: c.status,
-                dailyLimit: c.daily_limit,
+                dailyLimit: c.daily_limit || 0,
                 dailySends: latestDay.sent || 0
             };
         });
 
-        // 3. Calculate Capacity
-        // Total daily capacity = Sum of daily_limit of all accounts assigned to this user
+        // 6. Calculate Capacity
         const totalCapacity = filteredAccounts.length > 0
-            ? filteredAccounts.reduce((sum, acc) => sum + (acc.daily_limit || 50), 0)
-            : allAccounts.length / 2 * 50; // Fallback if tags not found on accounts
+            ? filteredAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0)
+            : allAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0) / 2;
 
         const freeCapacity = Math.max(0, totalCapacity - totalSends);
 
@@ -85,7 +134,7 @@ router.get('/', async (req, res) => {
                 totalReplies,
                 bounceRate: totalSends > 0 ? (totalBounces / totalSends) * 100 : 0,
                 replyRate: totalSends > 0 ? (totalReplies / totalSends) * 100 : 0,
-                activeCampaignsCount: filteredCampaigns.filter(c => c.status === 1).length,
+                activeCampaignsCount: filteredCampaigns.filter((c: any) => c.status === 1).length,
                 totalCapacity,
                 freeCapacity,
                 freeCapacityPercentage: totalCapacity > 0 ? (freeCapacity / totalCapacity) * 100 : 0
