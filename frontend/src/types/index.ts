@@ -1,3 +1,11 @@
+export interface Campaign {
+    id: string;
+    name: string;
+    status: number;
+    dailyLimit: number;
+    dailySends: number;
+}
+
 export interface DashboardMetrics {
     user: string;
     metrics: {
@@ -6,11 +14,12 @@ export interface DashboardMetrics {
         totalReplies: number;
         bounceRate: number;
         replyRate: number;
-        activeCampaigns: number;
+        activeCampaignsCount: number;
         totalCapacity: number;
         freeCapacity: number;
         freeCapacityPercentage: number;
     };
+    campaigns: Campaign[];
 }
 
 export interface Recommendation {

@@ -53,23 +53,23 @@ export default function Home() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             <MetricsCard
               title="Total Sends"
-              value={metrics?.metrics.totalSends || 0}
+              value={metrics?.metrics.totalSends ?? 0}
               subtitle="Daily across all accounts"
             />
             <MetricsCard
               title="Bounce Rate"
-              value={`${metrics?.metrics.bounceRate.toFixed(1)}%`}
+              value={`${(metrics?.metrics.bounceRate ?? 0).toFixed(1)}%`}
               trend={{ value: 2.1, label: 'vs yesterday', isPositive: false }}
             />
             <MetricsCard
               title="Reply Rate"
-              value={`${metrics?.metrics.replyRate.toFixed(1)}%`}
+              value={`${(metrics?.metrics.replyRate ?? 0).toFixed(1)}%`}
               trend={{ value: 0.8, label: 'vs yesterday', isPositive: true }}
             />
             <MetricsCard
               title="Free Capacity"
-              value={metrics?.metrics.freeCapacity || 0}
-              subtitle={`${metrics?.metrics.freeCapacityPercentage.toFixed(0)}% available`}
+              value={metrics?.metrics.freeCapacity ?? 0}
+              subtitle={`${(metrics?.metrics.freeCapacityPercentage ?? 0).toFixed(0)}% available`}
             />
           </div>
 
@@ -79,31 +79,30 @@ export default function Home() {
               <CapacityHeatmap data={[]} />
               <div className="p-8 rounded-2xl glass">
                 <h3 className="text-xl font-bold text-foreground mb-6">Active Campaigns</h3>
-                <div className="space-y-4">
-                  <div className="p-4 rounded-xl bg-background/30 border border-border flex items-center justify-between">
-                    <div className="space-y-1">
-                      <p className="font-bold text-foreground">SaaS Outreach V2</p>
-                      <p className="text-xs text-muted-foreground">Active • Started 2 days ago</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-black text-primary">45/day</p>
-                      <div className="w-24 h-1 bg-muted rounded-full overflow-hidden mt-1">
-                        <div className="h-full bg-primary" style={{ width: '85%' }}></div>
+                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                  {metrics?.campaigns && metrics.campaigns.length > 0 ? (
+                    metrics.campaigns.map((camp) => (
+                      <div key={camp.id} className="p-4 rounded-xl bg-background/30 border border-border flex items-center justify-between">
+                        <div className="space-y-1">
+                          <p className="font-bold text-foreground">{camp.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {camp.status === 1 ? 'Active' : camp.status === 2 ? 'Paused' : 'Draft'}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-black text-primary">{camp.dailySends}/day</p>
+                          <div className="w-24 h-1 bg-muted rounded-full overflow-hidden mt-1 text-[0px]">
+                            <div
+                              className="h-full bg-primary transition-all duration-500"
+                              style={{ width: `${Math.min(100, (camp.dailySends / (camp.dailyLimit || 50)) * 100)}%` }}
+                            ></div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <div className="p-4 rounded-xl bg-background/30 border border-border flex items-center justify-between">
-                    <div className="space-y-1">
-                      <p className="font-bold text-foreground">Enterprise Leads</p>
-                      <p className="text-xs text-muted-foreground">Active • Started 5 days ago</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-black text-primary">30/day</p>
-                      <div className="w-24 h-1 bg-muted rounded-full overflow-hidden mt-1">
-                        <div className="h-full bg-primary" style={{ width: '60%' }}></div>
-                      </div>
-                    </div>
-                  </div>
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground italic">No campaigns found for this user.</p>
+                  )}
                 </div>
               </div>
             </div>

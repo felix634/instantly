@@ -19,36 +19,53 @@ router.get('/', async (req, res) => {
             instantlyService.getCampaigns()
         ]);
 
-        // 2. Filter by user tag
-        // Note: We assume campaigns are tagged with the user's name
-        // Accounts might need a more custom mapping if tags aren't directly on them in V2
-        const filteredCampaigns = allCampaigns.filter(c => c.tags && c.tags.includes(userTag));
+        // 2. Filter campaigns by user tag
+        const filteredCampaigns = allCampaigns.filter(c =>
+            c.tags && c.tags.some(tag => tag.toLowerCase() === userTag.toLowerCase())
+        );
         const campaignIds = filteredCampaigns.map(c => c.id);
+
+        // Filter accounts by user tag
+        // Note: In V2 accounts might have tags. If not, we'd need to fetch them via /tags resource_type=account
+        const filteredAccounts = allAccounts.filter(acc => {
+            // This is a guess that V2 accounts have tags. 
+            // If they don't, we might need a more complex mapping.
+            return (acc as any).tags && (acc as any).tags.some((t: string) => t.toLowerCase() === userTag.toLowerCase());
+        });
 
         // Fetch analytics for each campaign
         const analyticsPromises = campaignIds.map(id => instantlyService.getCampaignAnalytics(id));
         const allCampaignAnalytics = await Promise.all(analyticsPromises);
 
-        // Aggregate data
+        // Aggregate data (Daily sends = sum of latest daily stats for these campaigns)
         let totalSends = 0;
         let totalBounces = 0;
         let totalReplies = 0;
-        let activeCampaignsCount = filteredCampaigns.filter(c => c.status === 1).length;
 
-        allCampaignAnalytics.forEach(campaignData => {
-            campaignData.forEach(day => {
-                // For simplicity, we just aggregate the latest day or sum up
-                // In a real app, we'd filter by date
-                totalSends += day.sent;
-                totalBounces += day.bounced;
-                totalReplies += day.replied;
-            });
+        const campaignsWithStats = filteredCampaigns.map((c, index) => {
+            const stats = allCampaignAnalytics[index];
+            // Get latest day stats
+            const latestDay = stats && stats.length > 0 ? stats[stats.length - 1] : { sent: 0, bounced: 0, replied: 0 };
+
+            totalSends += latestDay.sent || 0;
+            totalBounces += latestDay.bounced || 0;
+            totalReplies += latestDay.replied || 0;
+
+            return {
+                id: c.id,
+                name: c.name,
+                status: c.status,
+                dailyLimit: c.daily_limit,
+                dailySends: latestDay.sent || 0
+            };
         });
 
         // 3. Calculate Capacity
         // Total daily capacity = Sum of daily_limit of all accounts assigned to this user
-        // Current load = Sum of current sending volume of active campaigns
-        const totalCapacity = allAccounts.reduce((sum, acc) => sum + (acc.daily_limit || 50), 0);
+        const totalCapacity = filteredAccounts.length > 0
+            ? filteredAccounts.reduce((sum, acc) => sum + (acc.daily_limit || 50), 0)
+            : allAccounts.length / 2 * 50; // Fallback if tags not found on accounts
+
         const freeCapacity = Math.max(0, totalCapacity - totalSends);
 
         res.json({
@@ -59,11 +76,12 @@ router.get('/', async (req, res) => {
                 totalReplies,
                 bounceRate: totalSends > 0 ? (totalBounces / totalSends) * 100 : 0,
                 replyRate: totalSends > 0 ? (totalReplies / totalSends) * 100 : 0,
-                activeCampaigns: activeCampaignsCount,
+                activeCampaignsCount: filteredCampaigns.filter(c => c.status === 1).length,
                 totalCapacity,
                 freeCapacity,
                 freeCapacityPercentage: totalCapacity > 0 ? (freeCapacity / totalCapacity) * 100 : 0
-            }
+            },
+            campaigns: campaignsWithStats
         });
     } catch (error: any) {
         console.error('Error fetching analytics:', error);
