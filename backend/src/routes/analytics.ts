@@ -4,6 +4,35 @@ import { dbService } from '../services/supabase.service.js';
 
 const router = Router();
 
+let lastLog: any = null;
+const log = (data: any) => {
+    lastLog = { timestamp: new Date().toISOString(), ...data };
+    console.log(JSON.stringify(lastLog));
+};
+
+router.get('/debug', async (req, res) => {
+    try {
+        const [accounts, campaigns] = await Promise.all([
+            instantlyService.getAccounts(),
+            instantlyService.getCampaigns()
+        ]);
+
+        // Fetch tags sample
+        const campaignTags = await instantlyService.getTags('campaign');
+
+        res.json({
+            accountsCount: accounts.length,
+            campaignsCount: campaigns.length,
+            sampleCampaign: campaigns.length > 0 ? campaigns[0] : null,
+            allCampaignTags: campaignTags,
+            lastActivity: lastLog,
+            rawCampaigns: campaigns
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 router.get('/', async (req, res) => {
     try {
         const { user } = req.query;
@@ -35,7 +64,7 @@ router.get('/', async (req, res) => {
         // Filter accounts by user tag
         const filteredAccounts = allAccounts.filter(acc => hasTag(acc, userTag));
 
-        console.log(`User: ${user}, Tag: ${userTag}, Found Campaigns: ${filteredCampaigns.length}, Found Accounts: ${filteredAccounts.length}`);
+        log({ user, userTag, campaignsTotal: allCampaigns.length, accountsTotal: allAccounts.length, filteredCampaignsCount: filteredCampaigns.length, filteredAccountsCount: filteredAccounts.length });
 
         // Fetch analytics for each campaign
         const analyticsPromises = campaignIds.map(id => instantlyService.getCampaignAnalytics(id));
