@@ -54,7 +54,7 @@ export default function Home() {
             <MetricsCard
               title="Total Sends"
               value={metrics?.metrics.totalSends ?? 0}
-              subtitle="Daily across all accounts"
+              subtitle="Overall across all campaigns"
             />
             <MetricsCard
               title="Bounce Rate"
@@ -82,20 +82,25 @@ export default function Home() {
                 <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                   {metrics?.campaigns && metrics.campaigns.length > 0 ? (
                     metrics.campaigns.map((camp) => (
-                      <div key={camp.id} className="p-4 rounded-xl bg-background/30 border border-border flex items-center justify-between">
-                        <div className="space-y-1">
+                      <div key={camp.id} className="p-4 rounded-xl bg-background/30 border border-border">
+                        <div className="flex items-center justify-between mb-2">
                           <p className="font-bold text-foreground">{camp.name}</p>
-                          <p className="text-xs text-muted-foreground">
+                          <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${camp.status === 1 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
                             {camp.status === 1 ? 'Active' : camp.status === 2 ? 'Paused' : 'Draft'}
-                          </p>
+                          </span>
                         </div>
-                        <div className="text-right">
-                          <p className="font-black text-primary">{camp.dailySends}/day</p>
-                          <div className="w-24 h-1 bg-muted rounded-full overflow-hidden mt-1 text-[0px]">
-                            <div
-                              className="h-full bg-primary transition-all duration-500"
-                              style={{ width: `${Math.min(100, (camp.dailySends / (camp.dailyLimit || 50)) * 100)}%` }}
-                            ></div>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div>
+                            <p className="text-lg font-black text-foreground">{camp.totalSent}</p>
+                            <p className="text-[10px] uppercase text-muted-foreground font-bold">Sent</p>
+                          </div>
+                          <div>
+                            <p className={`text-lg font-black ${camp.bounceRate > 5 ? 'text-red-400' : 'text-foreground'}`}>{camp.bounceRate.toFixed(1)}%</p>
+                            <p className="text-[10px] uppercase text-muted-foreground font-bold">Bounce</p>
+                          </div>
+                          <div>
+                            <p className={`text-lg font-black ${camp.replyRate > 3 ? 'text-emerald-400' : 'text-foreground'}`}>{camp.replyRate.toFixed(1)}%</p>
+                            <p className="text-[10px] uppercase text-muted-foreground font-bold">Reply</p>
                           </div>
                         </div>
                       </div>

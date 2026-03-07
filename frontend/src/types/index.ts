@@ -3,7 +3,10 @@ export interface Campaign {
     name: string;
     status: number;
     dailyLimit: number;
-    dailySends: number;
+    totalSent: number;
+    bounceRate: number;
+    replyRate: number;
+    todaySends: number;
 }
 
 export interface DashboardMetrics {

@@ -97,25 +97,44 @@ router.get('/', async (req, res) => {
         );
         const allCampaignAnalytics = await Promise.all(analyticsPromises);
 
-        // 5. Aggregate data
-        let totalSends = 0;
-        let totalBounces = 0;
-        let totalReplies = 0;
+        // 5. Aggregate data — sum ALL days for overall performance rates
+        let overallSends = 0;
+        let overallBounces = 0;
+        let overallReplies = 0;
+        let todaysSends = 0; // For capacity calculation
+
+        const today = new Date().toISOString().split('T')[0];
 
         const campaignsWithStats = filteredCampaigns.map((c: any, index: number) => {
             const stats = allCampaignAnalytics[index];
-            const latestDay = stats && stats.length > 0 ? stats[stats.length - 1] : { sent: 0, bounced: 0, replied: 0 };
 
-            totalSends += latestDay.sent || 0;
-            totalBounces += latestDay.bounced || 0;
-            totalReplies += latestDay.replied || 0;
+            // Sum ALL historical days for overall performance
+            let campSent = 0, campBounced = 0, campReplied = 0, campTodaySends = 0;
+            if (stats && Array.isArray(stats)) {
+                stats.forEach((day: any) => {
+                    campSent += day.sent || 0;
+                    campBounced += day.bounced || 0;
+                    campReplied += day.replied || 0;
+                    if (day.date === today) {
+                        campTodaySends += day.sent || 0;
+                    }
+                });
+            }
+
+            overallSends += campSent;
+            overallBounces += campBounced;
+            overallReplies += campReplied;
+            todaysSends += campTodaySends;
 
             return {
                 id: c.id,
                 name: c.name,
                 status: c.status,
                 dailyLimit: c.daily_limit || 0,
-                dailySends: latestDay.sent || 0
+                totalSent: campSent,
+                bounceRate: campSent > 0 ? ((campBounced / campSent) * 100) : 0,
+                replyRate: campSent > 0 ? ((campReplied / campSent) * 100) : 0,
+                todaySends: campTodaySends
             };
         });
 
@@ -124,16 +143,16 @@ router.get('/', async (req, res) => {
             ? filteredAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0)
             : allAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0) / 2;
 
-        const freeCapacity = Math.max(0, totalCapacity - totalSends);
+        const freeCapacity = Math.max(0, totalCapacity - todaysSends);
 
         res.json({
             user: user === 'felix' ? 'Félix' : 'Árpi',
             metrics: {
-                totalSends,
-                totalBounces,
-                totalReplies,
-                bounceRate: totalSends > 0 ? (totalBounces / totalSends) * 100 : 0,
-                replyRate: totalSends > 0 ? (totalReplies / totalSends) * 100 : 0,
+                totalSends: overallSends,
+                totalBounces: overallBounces,
+                totalReplies: overallReplies,
+                bounceRate: overallSends > 0 ? (overallBounces / overallSends) * 100 : 0,
+                replyRate: overallSends > 0 ? (overallReplies / overallSends) * 100 : 0,
                 activeCampaignsCount: filteredCampaigns.filter((c: any) => c.status === 1).length,
                 totalCapacity,
                 freeCapacity,
