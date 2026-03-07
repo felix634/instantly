@@ -20,7 +20,16 @@ app.use(compression());
 app.use(express.json());
 
 // Routes
+app.get('/api', (req, res) => {
+    res.json({ message: 'Instantly Optimizer API v1.1', status: 'ready' });
+});
+
+app.get('/api/test', (req, res) => {
+    res.json({ message: 'Test route is working' });
+});
+
 app.get('/api/debug', async (req, res) => {
+    console.log('Debug route hit');
     try {
         const [accounts, campaigns] = await Promise.all([
             instantlyService.getAccounts(),
@@ -35,6 +44,7 @@ app.get('/api/debug', async (req, res) => {
             rawCampaigns: campaigns
         });
     } catch (error: any) {
+        console.error('Debug error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -46,6 +56,12 @@ app.use('/api/recommend-schedule', schedulerRoutes);
 // Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// 404 handler
+app.use((req, res) => {
+    console.log(`404 - Not Found: ${req.method} ${req.url}`);
+    res.status(404).json({ error: 'Route not found', path: req.url });
 });
 
 app.listen(PORT, () => {
