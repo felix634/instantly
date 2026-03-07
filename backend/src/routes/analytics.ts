@@ -4,34 +4,10 @@ import { dbService } from '../services/supabase.service.js';
 
 const router = Router();
 
-let lastLog: any = null;
+// Temporary log helper to fix lint error after moving debug route
 const log = (data: any) => {
-    lastLog = { timestamp: new Date().toISOString(), ...data };
-    console.log(JSON.stringify(lastLog));
+    console.log(JSON.stringify({ timestamp: new Date().toISOString(), ...data }));
 };
-
-router.get('/debug', async (req, res) => {
-    try {
-        const [accounts, campaigns] = await Promise.all([
-            instantlyService.getAccounts(),
-            instantlyService.getCampaigns()
-        ]);
-
-        // Fetch tags sample
-        const campaignTags = await instantlyService.getTags('campaign');
-
-        res.json({
-            accountsCount: accounts.length,
-            campaignsCount: campaigns.length,
-            sampleCampaign: campaigns.length > 0 ? campaigns[0] : null,
-            allCampaignTags: campaignTags,
-            lastActivity: lastLog,
-            rawCampaigns: campaigns
-        });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
 
 router.get('/', async (req, res) => {
     try {
