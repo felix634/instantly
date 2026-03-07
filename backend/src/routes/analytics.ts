@@ -19,19 +19,23 @@ router.get('/', async (req, res) => {
             instantlyService.getCampaigns()
         ]);
 
+        // Helper to check if a resource has a specific tag
+        const hasTag = (resource: any, targetTag: string) => {
+            if (!resource.tags) return false;
+            return resource.tags.some((t: any) => {
+                const label = typeof t === 'string' ? t : (t.label || t.name || '');
+                return label.toLowerCase() === targetTag.toLowerCase();
+            });
+        };
+
         // 2. Filter campaigns by user tag
-        const filteredCampaigns = allCampaigns.filter(c =>
-            c.tags && c.tags.some(tag => tag.toLowerCase() === userTag.toLowerCase())
-        );
+        const filteredCampaigns = allCampaigns.filter(c => hasTag(c, userTag));
         const campaignIds = filteredCampaigns.map(c => c.id);
 
         // Filter accounts by user tag
-        // Note: In V2 accounts might have tags. If not, we'd need to fetch them via /tags resource_type=account
-        const filteredAccounts = allAccounts.filter(acc => {
-            // This is a guess that V2 accounts have tags. 
-            // If they don't, we might need a more complex mapping.
-            return (acc as any).tags && (acc as any).tags.some((t: string) => t.toLowerCase() === userTag.toLowerCase());
-        });
+        const filteredAccounts = allAccounts.filter(acc => hasTag(acc, userTag));
+
+        console.log(`User: ${user}, Tag: ${userTag}, Found Campaigns: ${filteredCampaigns.length}, Found Accounts: ${filteredAccounts.length}`);
 
         // Fetch analytics for each campaign
         const analyticsPromises = campaignIds.map(id => instantlyService.getCampaignAnalytics(id));
