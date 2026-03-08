@@ -117,5 +117,23 @@ export const instantlyService = {
      */
     async getTagMappings(tagId: string): Promise<any[]> {
         return fetchAllItems('/custom-tag-mappings', { tag_ids: tagId });
+    },
+
+    /**
+     * Fetch bulk campaign analytics (provides per-campaign bounce stats)
+     * GET /api/v2/campaigns/analytics
+     * Returns array of campaign stats: { id, name, emails_sent_count, bounced_count, ... }
+     */
+    async getCampaignAnalyticsBulk(): Promise<any[]> {
+        try {
+            const response = await client.get('/campaigns/analytics');
+            const data: any = response.data;
+            if (Array.isArray(data)) return data;
+            if (data.items && Array.isArray(data.items)) return data.items;
+            return [];
+        } catch (err: any) {
+            console.error('getCampaignAnalyticsBulk failed:', err.message);
+            return [];
+        }
     }
 };

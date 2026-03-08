@@ -90,25 +90,28 @@ router.get('/', async (req, res) => {
 
         const totalCapacity = userAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0);
 
-        // 6. Fetch daily analytics per campaign AND the org-wide overview (for bounces)
-        const [orgOverview, ...allDailyData] = await Promise.all([
-            instantlyService.getCampaignOverview(''),
+        // 6. Fetch daily analytics per campaign AND the bulk campaign stats (for bounces)
+        const [bulkAnalytics, ...allDailyData] = await Promise.all([
+            instantlyService.getCampaignAnalyticsBulk(),
             ...filteredCampaigns.map((c: any) => instantlyService.getCampaignDaily(c.id))
         ]);
 
-        const orgBounceRate = orgOverview && orgOverview.emails_sent_count > 0
-            ? (orgOverview.bounced_count / orgOverview.emails_sent_count) * 100
-            : 0;
+        const analyticsMap = new Map<string, any>();
+        bulkAnalytics.forEach((stat: any) => {
+            if (stat.id) analyticsMap.set(stat.id, stat);
+        });
 
-        // 7. Build per-campaign stats from daily data
+        // 7. Build per-campaign stats from daily data + bulk analytics
         let overallSends = 0;
-        let overallBounces = 0; // Estimated from org rate
+        let overallBounces = 0;
         let overallReplies = 0;
         let todaysSends = 0;
         const todayStr = new Date().toISOString().split('T')[0];
 
         const campaignsWithStats = filteredCampaigns.map((c: any, index: number) => {
             const dailyStats = allDailyData[index] || [];
+            const bulkStat = analyticsMap.get(c.id);
+
             let campSent = 0, campReplied = 0, campTodaySent = 0;
 
             if (Array.isArray(dailyStats)) {
@@ -123,8 +126,12 @@ router.get('/', async (req, res) => {
                 });
             }
 
+            const campBounces = bulkStat?.bounced_count || 0;
+            const campSentTotal = bulkStat?.emails_sent_count || campSent;
+
             overallSends += campSent;
             overallReplies += campReplied;
+            overallBounces += campBounces;
             todaysSends += campTodaySent;
 
             return {
@@ -133,12 +140,10 @@ router.get('/', async (req, res) => {
                 status: c.status,
                 dailyLimit: c.daily_limit || 0,
                 totalSent: campSent,
-                bounceRate: orgBounceRate,
+                bounceRate: campSentTotal > 0 ? (campBounces / campSentTotal) * 100 : 0,
                 replyRate: campSent > 0 ? (campReplied / campSent) * 100 : 0
             };
         });
-
-        overallBounces = Math.floor(overallSends * (orgBounceRate / 100));
         const freeCapacity = Math.max(0, totalCapacity - todaysSends);
 
         // 8. Heatmap from daily data
@@ -178,7 +183,7 @@ router.get('/', async (req, res) => {
                 totalSends: overallSends,
                 totalBounces: overallBounces,
                 totalReplies: overallReplies,
-                bounceRate: orgBounceRate,
+                bounceRate: overallSends > 0 ? (overallBounces / overallSends) * 100 : 0,
                 replyRate: overallSends > 0 ? (overallReplies / overallSends) * 100 : 0,
                 activeCampaignsCount: filteredCampaigns.filter((c: any) => c.status === 1).length,
                 totalCapacity,
