@@ -6,7 +6,13 @@ export interface Campaign {
     totalSent: number;
     bounceRate: number;
     replyRate: number;
-    todaySends: number;
+}
+
+export interface HeatmapDay {
+    date: string;
+    sent: number;
+    capacity: number;
+    usage: number;
 }
 
 export interface DashboardMetrics {
@@ -23,6 +29,7 @@ export interface DashboardMetrics {
         freeCapacityPercentage: number;
     };
     campaigns: Campaign[];
+    heatmap: HeatmapDay[];
 }
 
 export interface Recommendation {

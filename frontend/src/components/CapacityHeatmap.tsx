@@ -1,29 +1,28 @@
 import React from 'react';
+import { HeatmapDay } from '../types';
 
 interface CapacityHeatmapProps {
-    data: {
-        date: string;
-        load: number; // 0 to 100
-    }[];
+    data: HeatmapDay[];
 }
 
 const CapacityHeatmap: React.FC<CapacityHeatmapProps> = ({ data }) => {
-    // Generate dummy data if none provided (for the next 14 days)
-    const displayData = data.length > 0 ? data : Array.from({ length: 14 }, (_, i) => {
-        const date = new Date();
-        date.setDate(date.getDate() + i);
-        return {
-            date: date.toISOString().split('T')[0],
-            load: Math.floor(Math.random() * 90) + 10
-        };
-    });
+    const displayData = data.length > 0 ? data : [];
 
-    const getIntensityClass = (load: number) => {
-        if (load > 85) return 'bg-destructive/60 border-destructive/40';
-        if (load > 70) return 'bg-orange-500/60 border-orange-400/40';
-        if (load > 40) return 'bg-primary/60 border-primary/40';
+    const getIntensityClass = (usage: number) => {
+        if (usage > 85) return 'bg-destructive/60 border-destructive/40';
+        if (usage > 70) return 'bg-orange-500/60 border-orange-400/40';
+        if (usage > 40) return 'bg-primary/60 border-primary/40';
         return 'bg-emerald-500/60 border-emerald-400/40';
     };
+
+    if (displayData.length === 0) {
+        return (
+            <div className="p-6 rounded-2xl glass">
+                <h3 className="text-lg font-semibold text-foreground mb-6">Capacity Heatmap</h3>
+                <p className="text-muted-foreground italic text-sm">No daily data available yet. Data will appear once campaigns have been sending for a few days.</p>
+            </div>
+        );
+    }
 
     return (
         <div className="p-6 rounded-2xl glass">
@@ -32,14 +31,17 @@ const CapacityHeatmap: React.FC<CapacityHeatmapProps> = ({ data }) => {
                 {displayData.map((day, idx) => (
                     <div
                         key={idx}
-                        className={`p-3 rounded-xl border flex flex-col items-center justify-center transition-all hover:scale-105 ${getIntensityClass(day.load)}`}
+                        className={`p-3 rounded-xl border flex flex-col items-center justify-center transition-all hover:scale-105 ${getIntensityClass(day.usage)}`}
                     >
                         <span className="text-[10px] uppercase font-bold text-white/70">
-                            {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })}
+                            {new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
                         </span>
-                        <span className="text-lg font-black text-white">{day.load}%</span>
+                        <span className="text-lg font-black text-white">{Math.round(day.usage)}%</span>
                         <span className="text-[10px] font-medium text-white/50">
-                            {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                        <span className="text-[9px] font-medium text-white/40 mt-0.5">
+                            {day.sent} sent
                         </span>
                     </div>
                 ))}

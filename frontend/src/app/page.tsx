@@ -76,7 +76,7 @@ export default function Home() {
           {/* Main Sections Grid */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-12">
             <div className="space-y-12">
-              <CapacityHeatmap data={[]} />
+              <CapacityHeatmap data={metrics?.heatmap ?? []} />
               <div className="p-8 rounded-2xl glass">
                 <h3 className="text-xl font-bold text-foreground mb-6">Active Campaigns</h3>
                 <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">

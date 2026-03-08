@@ -37,36 +37,37 @@ app.get('/api/debug', async (req, res) => {
         ]);
         const customTags = await instantlyService.getTags('campaign');
 
-        // Build tag map
         const tagMap: Record<string, string> = {};
         customTags.forEach((t: any) => { if (t.id && t.label) tagMap[t.id] = t.label; });
 
-        let sampleAnalytics = null;
+        let sampleOverview = null;
+        let sampleDaily = null;
         if (campaigns.length > 0) {
-            try {
-                sampleAnalytics = await instantlyService.getCampaignAnalytics(campaigns[0].id);
-            } catch (e: any) {
-                sampleAnalytics = { error: e.message };
-            }
+            sampleOverview = await instantlyService.getCampaignOverview(campaigns[0].id);
+            sampleDaily = await instantlyService.getCampaignDaily(campaigns[0].id);
         }
 
         res.json({
-            apiVersion: '2.0-fixed-analytics',
+            apiVersion: '3.0-overview',
             accountsCount: accounts.length,
             campaignsCount: campaigns.length,
             customTagsCount: customTags.length,
             tagMap,
-            sampleCampaign: campaigns.length > 0 ? campaigns[0] : null,
-            sampleAnalytics,
-            sampleAccount: accounts.length > 0 ? accounts[0] : null,
-            allCampaigns: campaigns.map((c: any) => ({
-                id: c.id,
-                name: c.name,
-                status: c.status,
-                tags: c.tags,
-                email_tag_list: c.email_tag_list,
-                tag_ids: c.tag_ids
-            }))
+            sampleCampaign: campaigns.length > 0 ? {
+                id: campaigns[0].id,
+                name: campaigns[0].name,
+                status: campaigns[0].status,
+                email_tag_list: campaigns[0].email_tag_list,
+                email_list: campaigns[0].email_list,
+                daily_limit: campaigns[0].daily_limit
+            } : null,
+            sampleOverview,
+            sampleDaily: sampleDaily?.slice(0, 3),
+            sampleAccount: accounts.length > 0 ? {
+                email: accounts[0].email,
+                daily_limit: accounts[0].daily_limit,
+                status: accounts[0].status
+            } : null
         });
     } catch (error: any) {
         console.error('Debug error:', error);
