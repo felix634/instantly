@@ -107,5 +107,15 @@ export const instantlyService = {
      */
     async getTags(resourceType: 'account' | 'campaign'): Promise<any[]> {
         return fetchAllItems('/custom-tags', { resource_type: resourceType });
+    },
+
+    /**
+     * Fetch custom tag mappings — which resources have which tags
+     * GET /api/v2/custom-tag-mappings?tag_ids=xxx
+     * Returns items with { tag_id, resource_id, resource_type }
+     * resource_type: 1 = campaign, 2 = account
+     */
+    async getTagMappings(tagId: string): Promise<any[]> {
+        return fetchAllItems('/custom-tag-mappings', { tag_ids: tagId });
     }
 };

@@ -76,29 +76,32 @@ router.get('/', async (req, res) => {
             };
         });
 
-        // 6. Calculate Capacity
-        // Accounts don't have tags — map them via campaign email_list
-        const userEmails = new Set<string>();
-        filteredCampaigns.forEach((c: any) => {
-            if (c.email_list && Array.isArray(c.email_list)) {
-                c.email_list.forEach((email: string) => userEmails.add(email));
-            }
-        });
+        // 6. Calculate Capacity using tag mappings
+        // Fetch which resources have the user's tag assigned
+        let userAccounts: any[] = [];
+        if (userTagId) {
+            const tagMappings = await instantlyService.getTagMappings(userTagId);
+            // resource_type 2 = account
+            const accountResourceIds = tagMappings
+                .filter((m: any) => m.resource_type === 2)
+                .map((m: any) => m.resource_id);
 
-        // Match accounts by email
-        const userAccounts = allAccounts.filter((acc: any) => userEmails.has(acc.email));
+            // Match accounts by their email (resource_id for accounts is the email)
+            userAccounts = allAccounts.filter((acc: any) =>
+                accountResourceIds.includes(acc.email)
+            );
+        }
 
-        // If we found accounts via email matching, use those. Otherwise fallback.
         const totalCapacity = userAccounts.length > 0
             ? userAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0)
-            : allAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0);
+            : 0;
 
-        // Daily sends for capacity = sum of today's sends (we'll approximate from overview for now)
-        // In a more advanced version, we'd fetch daily analytics for today
+        console.log(`User accounts: ${userAccounts.length}, capacity: ${totalCapacity}, emails: ${userAccounts.map((a: any) => a.email).join(', ')}`);
+
         const todaysSends = 0; // Will be enhanced with daily endpoint later
         const freeCapacity = Math.max(0, totalCapacity - todaysSends);
 
-        console.log(`Accounts matched: ${userAccounts.length}, emails: ${[...userEmails].join(', ')}, capacity: ${totalCapacity}`);
+
 
         // 7. Fetch daily analytics for heatmap data
         const dailyPromises = filteredCampaigns.map((c: any) =>
