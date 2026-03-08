@@ -23,7 +23,26 @@ export const dbService = {
             .eq('instantly_tag', tag)
             .single();
 
-        if (error) throw error;
+        if (error && error.code !== 'PGRST116') throw error;
+        return data;
+    },
+
+    /**
+     * Get user by their Display Name (case-insensitive)
+     */
+    async getUserByDisplayName(displayName: string) {
+        // Handle accented characters by using ilike or normalized comparison if possible
+        // For simplicity, we match the literal names 'Félix' and 'Árpi' based on common frontend inputs
+        const normalizedName = displayName.toLowerCase() === 'felix' ? 'Félix' :
+            displayName.toLowerCase() === 'arpi' ? 'Árpi' : displayName;
+
+        const { data, error } = await supabase
+            .from('users')
+            .select('*')
+            .ilike('display_name', normalizedName)
+            .single();
+
+        if (error && error.code !== 'PGRST116') throw error;
         return data;
     },
 
