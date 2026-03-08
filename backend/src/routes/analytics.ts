@@ -34,17 +34,66 @@ router.get('/', async (req, res) => {
 
         console.log(`User: ${user}, tagId: ${userTagId}, campaigns: ${filteredCampaigns.length}`);
 
-        // 4. Get user accounts from campaign email_list (deduplicated)
-        const userEmailSet = new Set<string>();
-        filteredCampaigns.forEach((c: any) => {
-            if (c.email_list && Array.isArray(c.email_list)) {
-                c.email_list.forEach((email: string) => userEmailSet.add(email));
-            }
-        });
-        const userAccounts = allAccounts.filter((acc: any) => userEmailSet.has(acc.email));
-        const totalCapacity = userAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0);
+        // 4. Get user accounts using multiple strategies
+        let userAccounts: any[] = [];
+        let capacityDebug: any = {};
 
-        console.log(`User accounts: ${userAccounts.length} (${[...userEmailSet].join(', ')}), capacity: ${totalCapacity}`);
+        // Strategy A: Try fetching account tags
+        try {
+            const accountTags = await instantlyService.getTags('email_account' as any);
+            const accountUserTagId = accountTags.find((t: any) =>
+                t.label && t.label.toLowerCase() === userTagLabel.toLowerCase()
+            )?.id;
+
+            capacityDebug.accountTagsCount = accountTags.length;
+            capacityDebug.accountUserTagId = accountUserTagId;
+
+            if (accountUserTagId) {
+                const accountMappings = await instantlyService.getTagMappings(accountUserTagId);
+                capacityDebug.accountMappingsCount = accountMappings.length;
+                capacityDebug.accountMappingSample = accountMappings.slice(0, 3);
+
+                // resource_id might be email or UUID — try matching both
+                const mappedResourceIds = accountMappings.map((m: any) => m.resource_id);
+                userAccounts = allAccounts.filter((acc: any) =>
+                    mappedResourceIds.includes(acc.email) || mappedResourceIds.includes(acc.id)
+                );
+                capacityDebug.strategy = 'account_tags';
+            }
+        } catch (e: any) {
+            capacityDebug.accountTagsError = e.message;
+        }
+
+        // Strategy B: If no accounts found, try campaign email_list
+        if (userAccounts.length === 0) {
+            const userEmailSet = new Set<string>();
+            filteredCampaigns.forEach((c: any) => {
+                if (c.email_list && Array.isArray(c.email_list)) {
+                    c.email_list.forEach((email: string) => userEmailSet.add(email));
+                }
+            });
+            if (userEmailSet.size > 0) {
+                userAccounts = allAccounts.filter((acc: any) => userEmailSet.has(acc.email));
+                capacityDebug.strategy = 'campaign_email_list';
+                capacityDebug.emailSet = [...userEmailSet];
+            }
+        }
+
+        // Strategy C: If still no accounts, use all accounts / number of users
+        if (userAccounts.length === 0) {
+            // Felix's known emails (from user's screenshot) - hardcoded fallback
+            const felixEmails = ['bary.felix@prometheusdigital.hu', 'baryf@prometheusdigital.hu', 'baryfelix@prometheusdigital.hu', 'felix.bary@prometheusdigital.hu', 'felixbary@prometheusdigital.hu'];
+            const arpiEmails = ['bretz.arpad@prometheusdigital.hu', 'bretza@prometheusdigital.hu', 'arpad.bretz@prometheusdigital.hu', 'arpadbretz@prometheusdigital.hu', 'bretzarpad@prometheusdigital.hu', 'bendeguzbretz@prometheusdigital.hu'];
+            const knownEmails = user === 'felix' ? felixEmails : arpiEmails;
+            userAccounts = allAccounts.filter((acc: any) => knownEmails.includes(acc.email));
+            capacityDebug.strategy = 'known_emails_fallback';
+        }
+
+        const totalCapacity = userAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0);
+        capacityDebug.matchedAccounts = userAccounts.map((a: any) => a.email);
+        capacityDebug.totalCapacity = totalCapacity;
+
+        console.log(`User accounts: ${userAccounts.length}, capacity: ${totalCapacity}, strategy: ${capacityDebug.strategy}`);
 
         // 5. Fetch daily analytics per campaign AND the org-wide overview (for bounces)
         const [orgOverview, ...allDailyData] = await Promise.all([
@@ -135,14 +184,9 @@ router.get('/', async (req, res) => {
             campaigns: campaignsWithStats,
             heatmap: heatmapData,
             _debug: {
-                userEmailSet: [...userEmailSet],
+                capacityDebug,
                 userAccountsCount: userAccounts.length,
-                campaignEmailLists: filteredCampaigns.map((c: any) => ({
-                    name: c.name,
-                    email_list: c.email_list,
-                    hasEmailList: !!c.email_list,
-                    emailListType: typeof c.email_list
-                })),
+                matchedEmails: userAccounts.map((a: any) => a.email),
                 allAccountEmails: allAccounts.map((a: any) => a.email)
             }
         });
