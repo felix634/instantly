@@ -41,13 +41,23 @@ app.get('/api/debug', async (req, res) => {
         const tagMap: Record<string, string> = {};
         customTags.forEach((t: any) => { if (t.id && t.label) tagMap[t.id] = t.label; });
 
+        let sampleAnalytics = null;
+        if (campaigns.length > 0) {
+            try {
+                sampleAnalytics = await instantlyService.getCampaignAnalytics(campaigns[0].id);
+            } catch (e: any) {
+                sampleAnalytics = { error: e.message };
+            }
+        }
+
         res.json({
-            apiVersion: '2.0-fixed',
+            apiVersion: '2.0-fixed-analytics',
             accountsCount: accounts.length,
             campaignsCount: campaigns.length,
             customTagsCount: customTags.length,
             tagMap,
             sampleCampaign: campaigns.length > 0 ? campaigns[0] : null,
+            sampleAnalytics,
             sampleAccount: accounts.length > 0 ? accounts[0] : null,
             allCampaigns: campaigns.map((c: any) => ({
                 id: c.id,
