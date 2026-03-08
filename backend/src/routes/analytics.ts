@@ -49,8 +49,11 @@ router.get('/', async (req, res) => {
             capacityDebug.accountUserTagId = accountUserTagId;
 
             if (accountUserTagId) {
-                const accountMappings = await instantlyService.getTagMappings(accountUserTagId);
-                capacityDebug.accountMappingsCount = accountMappings.length;
+                const allMappings = await instantlyService.getTagMappings(accountUserTagId);
+                // API may return all mappings — filter client-side by tag_id
+                const accountMappings = allMappings.filter((m: any) => m.tag_id === accountUserTagId);
+                capacityDebug.totalMappings = allMappings.length;
+                capacityDebug.filteredMappings = accountMappings.length;
                 capacityDebug.accountMappingSample = accountMappings.slice(0, 3);
 
                 // resource_id might be email or UUID — try matching both
@@ -58,7 +61,7 @@ router.get('/', async (req, res) => {
                 userAccounts = allAccounts.filter((acc: any) =>
                     mappedResourceIds.includes(acc.email) || mappedResourceIds.includes(acc.id)
                 );
-                capacityDebug.strategy = 'account_tags';
+                capacityDebug.strategy = userAccounts.length > 0 ? 'account_tags_filtered' : 'account_tags_no_match';
             }
         } catch (e: any) {
             capacityDebug.accountTagsError = e.message;
