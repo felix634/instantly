@@ -31,58 +31,71 @@ app.get('/api/test', (req, res) => {
 app.get('/api/debug', async (req, res) => {
     console.log('Debug route hit');
     try {
-        const [accounts, campaigns] = await Promise.all([
-            instantlyService.getAccounts(),
-            instantlyService.getCampaigns()
-        ]);
-        const customTags = await instantlyService.getTags('campaign');
+        const axios = require('axios');
+        const API_KEY = process.env.INSTANTLY_API_KEY;
+        const BASE = 'https://api.instantly.ai/api/v2';
+        const headers = { 'Authorization': `Bearer ${API_KEY}` };
 
-        const tagMap: Record<string, string> = {};
-        customTags.forEach((t: any) => { if (t.id && t.label) tagMap[t.id] = t.label; });
+        // Get campaigns first
+        const campaignsRes = await axios.get(`${BASE}/campaigns`, { headers, params: { limit: 5 } });
+        const firstCampaign = campaignsRes.data?.items?.[0] || campaignsRes.data?.[0];
+        const campId = firstCampaign?.id;
+        const campName = firstCampaign?.name;
 
-        // Get Felix tag ID
-        const felixTagId = customTags.find((t: any) => t.label && t.label.toLowerCase().includes('félix'))?.id;
+        // Test 1: daily WITH campaign_id
+        const daily1 = await axios.get(`${BASE}/campaigns/analytics/daily`, {
+            headers, params: { campaign_id: campId }
+        });
 
-        // Fetch tag mappings for Felix's tag
-        let tagMappings: any[] = [];
-        if (felixTagId) {
-            tagMappings = await instantlyService.getTagMappings(felixTagId);
-        }
+        // Test 2: daily WITHOUT campaign_id
+        const daily2 = await axios.get(`${BASE}/campaigns/analytics/daily`, {
+            headers, params: {}
+        });
 
-        // Get overview for TWO different campaigns to see if they differ
-        let overview1 = null, overview2 = null;
-        const activeCampaigns = campaigns.filter((c: any) => c.status === 1);
-        if (activeCampaigns.length > 0) {
-            overview1 = await instantlyService.getCampaignOverview(activeCampaigns[0].id);
-        }
-        if (activeCampaigns.length > 1) {
-            overview2 = await instantlyService.getCampaignOverview(activeCampaigns[1].id);
-        }
+        // Test 3: overview WITH campaign_id
+        const ov1 = await axios.get(`${BASE}/campaigns/analytics/overview`, {
+            headers, params: { campaign_id: campId }
+        });
 
-        // Get daily for first campaign
-        let daily1: any[] = [];
-        if (activeCampaigns.length > 0) {
-            daily1 = await instantlyService.getCampaignDaily(activeCampaigns[0].id);
-        }
+        // Test 4: overview WITHOUT campaign_id (all campaigns)
+        const ov2 = await axios.get(`${BASE}/campaigns/analytics/overview`, {
+            headers, params: {}
+        });
+
+        // Get accounts for capacity check
+        const accts = await axios.get(`${BASE}/accounts`, { headers, params: { limit: 100 } });
+        const accounts = accts.data?.items || accts.data || [];
+
+        // Felix campaign emails
+        const felixTagId = 'de5eb56d-570c-42d2-a797-5919240137f3';
+        const allCamps = campaignsRes.data?.items || campaignsRes.data || [];
 
         res.json({
-            apiVersion: '4.0-diag',
-            accountsCount: accounts.length,
-            campaignsCount: campaigns.length,
-            tagMap,
-            felixTagId,
-            tagMappings: tagMappings.slice(0, 10),
-            tagMappingSample: tagMappings.length > 0 ? tagMappings[0] : null,
-            campaign1: activeCampaigns.length > 0 ? { id: activeCampaigns[0].id, name: activeCampaigns[0].name } : null,
-            overview1,
-            campaign2: activeCampaigns.length > 1 ? { id: activeCampaigns[1].id, name: activeCampaigns[1].name } : null,
-            overview2,
-            daily1Sample: daily1.slice(0, 2),
-            accounts: accounts.map((a: any) => ({ email: a.email, daily_limit: a.daily_limit }))
+            apiVersion: '5.0-raw-test',
+            testCampaign: { id: campId, name: campName },
+            daily_withCampaignId: {
+                type: typeof daily1.data,
+                isArray: Array.isArray(daily1.data),
+                hasItems: !!daily1.data?.items,
+                count: Array.isArray(daily1.data) ? daily1.data.length : daily1.data?.items?.length || 'N/A',
+                sample: (daily1.data?.items || daily1.data)?.slice?.(0, 2) || daily1.data
+            },
+            daily_withoutCampaignId: {
+                type: typeof daily2.data,
+                isArray: Array.isArray(daily2.data),
+                hasItems: !!daily2.data?.items,
+                count: Array.isArray(daily2.data) ? daily2.data.length : daily2.data?.items?.length || 'N/A',
+                sample: (daily2.data?.items || daily2.data)?.slice?.(0, 2) || daily2.data
+            },
+            overview_withCampaignId: ov1.data,
+            overview_withoutCampaignId: ov2.data,
+            overviewsMatch: JSON.stringify(ov1.data) === JSON.stringify(ov2.data),
+            accountCount: accounts.length,
+            accountSample: accounts.slice(0, 2).map((a: any) => ({ email: a.email, daily_limit: a.daily_limit }))
         });
     } catch (error: any) {
-        console.error('Debug error:', error);
-        res.status(500).json({ error: error.message });
+        console.error('Debug error:', error?.response?.data || error.message);
+        res.status(500).json({ error: error.message, apiError: error?.response?.data });
     }
 });
 
