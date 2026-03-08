@@ -40,38 +40,49 @@ app.get('/api/debug', async (req, res) => {
         const tagMap: Record<string, string> = {};
         customTags.forEach((t: any) => { if (t.id && t.label) tagMap[t.id] = t.label; });
 
-        let sampleOverview = null;
-        let sampleDaily = null;
-        if (campaigns.length > 0) {
-            sampleOverview = await instantlyService.getCampaignOverview(campaigns[0].id);
-            sampleDaily = await instantlyService.getCampaignDaily(campaigns[0].id);
+        // Get Felix tag ID
+        const felixTagId = customTags.find((t: any) => t.label && t.label.toLowerCase().includes('félix'))?.id;
+
+        // Fetch tag mappings for Felix's tag
+        let tagMappings: any[] = [];
+        if (felixTagId) {
+            tagMappings = await instantlyService.getTagMappings(felixTagId);
+        }
+
+        // Get overview for TWO different campaigns to see if they differ
+        let overview1 = null, overview2 = null;
+        const activeCampaigns = campaigns.filter((c: any) => c.status === 1);
+        if (activeCampaigns.length > 0) {
+            overview1 = await instantlyService.getCampaignOverview(activeCampaigns[0].id);
+        }
+        if (activeCampaigns.length > 1) {
+            overview2 = await instantlyService.getCampaignOverview(activeCampaigns[1].id);
+        }
+
+        // Get daily for first campaign
+        let daily1: any[] = [];
+        if (activeCampaigns.length > 0) {
+            daily1 = await instantlyService.getCampaignDaily(activeCampaigns[0].id);
         }
 
         res.json({
-            apiVersion: '3.0-overview',
+            apiVersion: '4.0-diag',
             accountsCount: accounts.length,
             campaignsCount: campaigns.length,
-            customTagsCount: customTags.length,
             tagMap,
-            sampleCampaign: campaigns.length > 0 ? {
-                id: campaigns[0].id,
-                name: campaigns[0].name,
-                status: campaigns[0].status,
-                email_tag_list: campaigns[0].email_tag_list,
-                email_list: campaigns[0].email_list,
-                daily_limit: campaigns[0].daily_limit
-            } : null,
-            sampleOverview,
-            sampleDaily: sampleDaily?.slice(0, 3),
-            sampleAccount: accounts.length > 0 ? {
-                email: accounts[0].email,
-                daily_limit: accounts[0].daily_limit,
-                status: accounts[0].status
-            } : null
+            felixTagId,
+            tagMappings: tagMappings.slice(0, 10),
+            tagMappingSample: tagMappings.length > 0 ? tagMappings[0] : null,
+            campaign1: activeCampaigns.length > 0 ? { id: activeCampaigns[0].id, name: activeCampaigns[0].name } : null,
+            overview1,
+            campaign2: activeCampaigns.length > 1 ? { id: activeCampaigns[1].id, name: activeCampaigns[1].name } : null,
+            overview2,
+            daily1Sample: daily1.slice(0, 2),
+            accounts: accounts.map((a: any) => ({ email: a.email, daily_limit: a.daily_limit }))
         });
     } catch (error: any) {
         console.error('Debug error:', error);
-        res.status(500).json({ error: error.message, stack: error.stack?.split('\n').slice(0, 3) });
+        res.status(500).json({ error: error.message });
     }
 });
 
