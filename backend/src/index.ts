@@ -70,9 +70,14 @@ app.get('/api/debug', async (req, res) => {
         const felixTagId = 'de5eb56d-570c-42d2-a797-5919240137f3';
         const allCamps = campaignsRes.data?.items || campaignsRes.data || [];
 
+        // Test 5: /campaigns/analytics (without /overview)
+        const ana1 = await axios.get(`${BASE}/campaigns/analytics`, {
+            headers, params: { campaign_id: campId }
+        });
+
         res.json({
-            apiVersion: '5.0-raw-test',
-            testCampaign: { id: campId, name: campName },
+            apiVersion: '5.1-ana-test',
+            testCampaign: firstCampaign, // Full object
             daily_withCampaignId: {
                 type: typeof daily1.data,
                 isArray: Array.isArray(daily1.data),
@@ -80,16 +85,8 @@ app.get('/api/debug', async (req, res) => {
                 count: Array.isArray(daily1.data) ? daily1.data.length : daily1.data?.items?.length || 'N/A',
                 sample: (daily1.data?.items || daily1.data)?.slice?.(0, 2) || daily1.data
             },
-            daily_withoutCampaignId: {
-                type: typeof daily2.data,
-                isArray: Array.isArray(daily2.data),
-                hasItems: !!daily2.data?.items,
-                count: Array.isArray(daily2.data) ? daily2.data.length : daily2.data?.items?.length || 'N/A',
-                sample: (daily2.data?.items || daily2.data)?.slice?.(0, 2) || daily2.data
-            },
             overview_withCampaignId: ov1.data,
-            overview_withoutCampaignId: ov2.data,
-            overviewsMatch: JSON.stringify(ov1.data) === JSON.stringify(ov2.data),
+            analytics_endpoint: ana1.data,
             accountCount: accounts.length,
             accountSample: accounts.slice(0, 2).map((a: any) => ({ email: a.email, daily_limit: a.daily_limit }))
         });
