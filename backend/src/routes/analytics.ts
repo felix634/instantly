@@ -133,7 +133,18 @@ router.get('/', async (req, res) => {
                 freeCapacityPercentage: totalCapacity > 0 ? (freeCapacity / totalCapacity) * 100 : 0
             },
             campaigns: campaignsWithStats,
-            heatmap: heatmapData
+            heatmap: heatmapData,
+            _debug: {
+                userEmailSet: [...userEmailSet],
+                userAccountsCount: userAccounts.length,
+                campaignEmailLists: filteredCampaigns.map((c: any) => ({
+                    name: c.name,
+                    email_list: c.email_list,
+                    hasEmailList: !!c.email_list,
+                    emailListType: typeof c.email_list
+                })),
+                allAccountEmails: allAccounts.map((a: any) => a.email)
+            }
         });
     } catch (error: any) {
         console.error('Error fetching analytics:', error);
