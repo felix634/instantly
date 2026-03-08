@@ -31,7 +31,7 @@ app.get('/api/test', (req, res) => {
 app.get('/api/debug', async (req, res) => {
     console.log('Debug route hit');
     try {
-        const axios = require('axios');
+        const { default: axios } = await import('axios');
         const API_KEY = process.env.INSTANTLY_API_KEY;
         const BASE = 'https://api.instantly.ai/api/v2';
         const headers = { 'Authorization': `Bearer ${API_KEY}` };
