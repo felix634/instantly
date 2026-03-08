@@ -12,27 +12,19 @@ router.get('/', async (req, res) => {
 
         const userTagLabel = user === 'felix' ? 'Félix manageli' : 'Árpi manageli';
 
-        // 1. Fetch data from Instantly (all in parallel)
+        // 1. Fetch data from Instantly
         const [allAccounts, allCampaigns, allTags] = await Promise.all([
             instantlyService.getAccounts(),
             instantlyService.getCampaigns(),
             instantlyService.getTags('campaign')
         ]);
 
-        // 2. Build tag UUID → label map
-        const tagMap = new Map<string, string>();
-        allTags.forEach((tag: any) => {
-            if (tag.id && tag.label) {
-                tagMap.set(tag.id, tag.label);
-            }
-        });
-
-        // Find the UUID of the user's tag
+        // 2. Find the UUID of the user's tag
         const userTagId = allTags.find((tag: any) =>
             tag.label && tag.label.toLowerCase() === userTagLabel.toLowerCase()
         )?.id;
 
-        // 3. Filter campaigns by user tag (using email_tag_list which contains UUIDs)
+        // 3. Filter campaigns by user tag (campaigns have email_tag_list with tag UUIDs)
         const filteredCampaigns = allCampaigns.filter((c: any) => {
             if (c.email_tag_list && Array.isArray(c.email_tag_list) && userTagId) {
                 return c.email_tag_list.includes(userTagId);
@@ -40,96 +32,88 @@ router.get('/', async (req, res) => {
             return false;
         });
 
-        console.log(`User: ${user}, tag: ${userTagLabel}, tagId: ${userTagId}, campaigns: ${filteredCampaigns.length}/${allCampaigns.length}`);
+        console.log(`User: ${user}, tagId: ${userTagId}, campaigns: ${filteredCampaigns.length}/${allCampaigns.length}`);
 
-        // 4. Fetch analytics overview for each campaign (correct V2 endpoint)
-        const overviewPromises = filteredCampaigns.map((c: any) =>
-            instantlyService.getCampaignOverview(c.id)
+        // 4. Get user's accounts from campaign email_list (deduplicated)
+        const userEmailSet = new Set<string>();
+        filteredCampaigns.forEach((c: any) => {
+            if (c.email_list && Array.isArray(c.email_list)) {
+                c.email_list.forEach((email: string) => userEmailSet.add(email));
+            }
+        });
+        const userAccounts = allAccounts.filter((acc: any) => userEmailSet.has(acc.email));
+        const totalCapacity = userAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0);
+
+        console.log(`User accounts: ${userAccounts.length}, capacity: ${totalCapacity}`);
+
+        // 5. Fetch DAILY analytics for each campaign (the overview endpoint returns org-wide data)
+        const dailyPromises = filteredCampaigns.map((c: any) =>
+            instantlyService.getCampaignDaily(c.id)
         );
-        const allOverviews = await Promise.all(overviewPromises);
+        const allDailyData = await Promise.all(dailyPromises);
 
-        // 5. Aggregate overall stats from overviews
+        // 6. Aggregate per-campaign stats from daily data
         let overallSends = 0;
         let overallBounces = 0;
         let overallReplies = 0;
+        let todaysSends = 0;
+
+        const today = new Date().toISOString().split('T')[0];
 
         const campaignsWithStats = filteredCampaigns.map((c: any, index: number) => {
-            const overview = allOverviews[index];
+            const dailyStats = allDailyData[index] || [];
 
-            // V2 overview fields: emails_sent_count, bounced_count, reply_count, contacted_count, etc.
-            const sent = overview?.emails_sent_count || overview?.sent || overview?.contacted_count || 0;
-            const bounced = overview?.bounced_count || overview?.bounced || 0;
-            const replied = overview?.reply_count || overview?.replied || overview?.replies_count || 0;
+            let campSent = 0, campBounced = 0, campReplied = 0, campTodaySent = 0;
 
-            overallSends += sent;
-            overallBounces += bounced;
-            overallReplies += replied;
+            if (Array.isArray(dailyStats)) {
+                dailyStats.forEach((day: any) => {
+                    campSent += day.sent || day.emails_sent_count || 0;
+                    // Daily endpoint uses "replies" not "bounced_count"
+                    campBounced += day.bounced || day.bounces || day.bounced_count || 0;
+                    campReplied += day.replies || day.reply_count || day.unique_replies || 0;
+                    if (day.date === today) {
+                        campTodaySent += day.sent || day.emails_sent_count || 0;
+                    }
+                });
+            }
+
+            overallSends += campSent;
+            overallBounces += campBounced;
+            overallReplies += campReplied;
+            todaysSends += campTodaySent;
 
             return {
                 id: c.id,
                 name: c.name,
                 status: c.status,
                 dailyLimit: c.daily_limit || 0,
-                totalSent: sent,
-                bounceRate: sent > 0 ? (bounced / sent) * 100 : 0,
-                replyRate: sent > 0 ? (replied / sent) * 100 : 0
+                totalSent: campSent,
+                bounceRate: campSent > 0 ? (campBounced / campSent) * 100 : 0,
+                replyRate: campSent > 0 ? (campReplied / campSent) * 100 : 0
             };
         });
 
-        // 6. Calculate Capacity using tag mappings
-        // Fetch which resources have the user's tag assigned
-        let userAccounts: any[] = [];
-        if (userTagId) {
-            const tagMappings = await instantlyService.getTagMappings(userTagId);
-            // resource_type 2 = account
-            const accountResourceIds = tagMappings
-                .filter((m: any) => m.resource_type === 2)
-                .map((m: any) => m.resource_id);
-
-            // Match accounts by their email (resource_id for accounts is the email)
-            userAccounts = allAccounts.filter((acc: any) =>
-                accountResourceIds.includes(acc.email)
-            );
-        }
-
-        const totalCapacity = userAccounts.length > 0
-            ? userAccounts.reduce((sum: number, acc: any) => sum + (acc.daily_limit || 50), 0)
-            : 0;
-
-        console.log(`User accounts: ${userAccounts.length}, capacity: ${totalCapacity}, emails: ${userAccounts.map((a: any) => a.email).join(', ')}`);
-
-        const todaysSends = 0; // Will be enhanced with daily endpoint later
         const freeCapacity = Math.max(0, totalCapacity - todaysSends);
 
-
-
-        // 7. Fetch daily analytics for heatmap data
-        const dailyPromises = filteredCampaigns.map((c: any) =>
-            instantlyService.getCampaignDaily(c.id)
-        );
-        const allDailyData = await Promise.all(dailyPromises);
-
-        // Aggregate daily data into a date → usage map
-        const dailyMap = new Map<string, { sent: number; capacity: number }>();
+        // 7. Aggregate daily data into heatmap (date → total sent across all campaigns)
+        const dailyMap = new Map<string, number>();
         allDailyData.forEach(campaignDays => {
             if (Array.isArray(campaignDays)) {
                 campaignDays.forEach((day: any) => {
-                    const date = day.date || day.day;
+                    const date = day.date;
                     if (!date) return;
-                    const existing = dailyMap.get(date) || { sent: 0, capacity: totalCapacity };
-                    existing.sent += day.emails_sent_count || day.sent || day.contacted_count || 0;
-                    dailyMap.set(date, existing);
+                    const sent = day.sent || day.emails_sent_count || 0;
+                    dailyMap.set(date, (dailyMap.get(date) || 0) + sent);
                 });
             }
         });
 
-        // Convert to sorted array for heatmap (last 14 days)
         const heatmapData = Array.from(dailyMap.entries())
-            .map(([date, data]) => ({
+            .map(([date, sent]) => ({
                 date,
-                sent: data.sent,
+                sent,
                 capacity: totalCapacity,
-                usage: totalCapacity > 0 ? (data.sent / totalCapacity) * 100 : 0
+                usage: totalCapacity > 0 ? (sent / totalCapacity) * 100 : 0
             }))
             .sort((a, b) => a.date.localeCompare(b.date))
             .slice(-14);
