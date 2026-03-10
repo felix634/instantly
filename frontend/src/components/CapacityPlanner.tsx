@@ -156,12 +156,22 @@ export default function CapacityPlanner() {
 
     // GLOBAL SIMULATION
     const dailyData: DailyCapacity[] = useMemo(() => {
-        // State for simulation
+        // 1. Find the earliest start date to begin simulation
+        let earliestStart = new Date(today);
+        campaigns.forEach(c => {
+            const d = new Date(c.startDate + 'T12:00:00');
+            if (d < earliestStart) earliestStart = d;
+        });
+        // Normalize earliestStart to the Monday of its week to be consistent
+        let simDate = getStartMonday(earliestStart);
+        const simEndDate = allDates[allDates.length - 1];
+
+        // 2. State for simulation
         const pendingEmails = new Map<string, number>(); // campaignId -> remaining emails to send
         const campaignSequences = new Map<string, number>(); // campaignId -> current sequence index
         const campaignNextSendDate = new Map<string, string>(); // campaignId -> ISO date of next allowed sequence start
 
-        // Initialize campaign states
+        // Initialize campaign states (some might have already triggered before simStartDate)
         campaigns.forEach(c => {
             pendingEmails.set(c.id, 0);
             campaignSequences.set(c.id, 1);
@@ -170,19 +180,22 @@ export default function CapacityPlanner() {
         });
 
         const simulationResults: DailyCapacity[] = [];
+        const windowISO = allDates.map(toISO);
+        const windowSet = new Set(windowISO);
 
-        // We simulate day by day for the 3-week window
-        allDates.forEach(date => {
-            const iso = toISO(date);
-            const jsD = jsDay(date);
+        // 3. RUN SIMULATION
+        // We run day-by-day from earliestStart to the end of the 3-week window
+        let current = new Date(simDate);
+        while (current <= simEndDate) {
+            const iso = toISO(current);
+            const jsD = jsDay(current);
             const dayName = WEEKDAY_NAMES[jsD] as SendDay;
-            const isSendDayForAny = isWeekday(date);
+            const isSendDayForAny = isWeekday(current);
 
             const campaignBreakdown: DailyCapacity['campaignBreakdown'] = [];
             let totalEmailsRequestedToday = 0;
 
             // Total account capacity for TODAY
-            // Sum of accounts used by ANY campaign active today
             const accountsUsedToday = new Set<string>();
             campaigns.forEach(c => {
                 if (c.sendDays.includes(dayName)) {
@@ -200,17 +213,15 @@ export default function CapacityPlanner() {
             }
 
             if (isSendDayForAny) {
-                // 1. Process new sequences arriving today
+                // Process new sequences arriving today
                 campaigns.forEach(c => {
                     if (campaignNextSendDate.get(c.id) === iso) {
                         const activeLeads = Math.max(0, c.leads - c.bounces - c.replies);
-                        // Add full sequence batch to pending emails
                         pendingEmails.set(c.id, (pendingEmails.get(c.id) ?? 0) + activeLeads);
 
-                        // Schedule next sequence
                         const currentSeq = campaignSequences.get(c.id) ?? 1;
                         if (currentSeq < c.sequences) {
-                            const nextDate = nextSequenceDate(date, c.nextMessageDays, c.sendDays);
+                            const nextDate = nextSequenceDate(current, c.nextMessageDays, c.sendDays);
                             if (nextDate) {
                                 campaignSequences.set(c.id, currentSeq + 1);
                                 campaignNextSendDate.set(c.id, toISO(nextDate));
@@ -221,8 +232,7 @@ export default function CapacityPlanner() {
                     }
                 });
 
-                // 2. Identify how many emails each campaign WANTS to send today
-                // Each campaign is limited by its own dailyMaxEmails AND its pendingEmails
+                // Identify how many emails each campaign WANTS to send today
                 const campaignRequests: { id: string, name: string, amount: number }[] = [];
                 campaigns.forEach(c => {
                     const pending = pendingEmails.get(c.id) ?? 0;
@@ -233,50 +243,61 @@ export default function CapacityPlanner() {
                     }
                 });
 
-                // 3. Handle Capacity - If total > capacity, scale down
-                const scaleFactor = totalAccountCapacity > 0 && totalEmailsRequestedToday > totalAccountCapacity
-                    ? totalAccountCapacity / totalEmailsRequestedToday
-                    : 1;
-
+                // Handle Capacity - SCALE if combined demand > capacity
                 let totalSentToday = 0;
-                campaignRequests.forEach(req => {
-                    const sent = Math.floor(req.amount * scaleFactor);
+                let remainingCapacity = totalAccountCapacity;
+
+                campaignRequests.forEach((req, idx) => {
+                    // Proportional amount, floor it initially
+                    let sent = Math.floor((req.amount / totalEmailsRequestedToday) * totalAccountCapacity);
+
+                    // On the last campaign, or if we have tiny leftovers, try to fill up to capacity
+                    if (idx === campaignRequests.length - 1) {
+                        sent = Math.min(req.amount, remainingCapacity);
+                    } else {
+                        sent = Math.min(sent, req.amount, remainingCapacity);
+                    }
+
                     if (sent > 0) {
-                        campaignBreakdown.push({ campaignId: req.id, campaignName: req.name, demand: sent });
+                        if (windowSet.has(iso)) {
+                            campaignBreakdown.push({ campaignId: req.id, campaignName: req.name, demand: sent });
+                        }
                         totalSentToday += sent;
-                        // Deduct from pendingEmails
+                        remainingCapacity -= sent;
                         pendingEmails.set(req.id, (pendingEmails.get(req.id) ?? 0) - sent);
                     }
                 });
 
-                const usagePercent = totalAccountCapacity > 0
-                    ? Math.round((totalSentToday / totalAccountCapacity) * 100)
-                    : totalSentToday > 0 ? 100 : 0;
+                if (windowSet.has(iso)) {
+                    const usagePercent = totalAccountCapacity > 0
+                        ? Math.round((totalSentToday / totalAccountCapacity) * 100)
+                        : totalSentToday > 0 ? 100 : 0;
 
+                    simulationResults.push({
+                        date: iso,
+                        dayLabel: current.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
+                        totalAccountCapacity,
+                        totalEmailDemand: totalSentToday,
+                        usagePercent,
+                        campaignBreakdown,
+                    });
+                }
+            } else if (windowSet.has(iso)) {
                 simulationResults.push({
                     date: iso,
-                    dayLabel: date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
-                    totalAccountCapacity,
-                    totalEmailDemand: totalSentToday,
-                    usagePercent,
-                    campaignBreakdown,
-                });
-            } else {
-                // Weekend - no sending, skip result object? 
-                // The grid expects 15-21 days. We include weekends for UI consistency but mark them empty.
-                simulationResults.push({
-                    date: iso,
-                    dayLabel: date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
+                    dayLabel: current.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
                     totalAccountCapacity: 0,
                     totalEmailDemand: 0,
                     usagePercent: 0,
                     campaignBreakdown: [],
                 });
             }
-        });
+            current = addDays(current, 1);
+        }
 
         return simulationResults;
-    }, [allDates, campaigns, accounts, accountLimitMap]);
+    }, [allDates, campaigns, accounts, accountLimitMap, today]);
+
 
     // Group into 3 weeks of 7 days (including weekends) or filter to 5 days?
     // User wants "start with monday and finish with friday". 
