@@ -113,6 +113,27 @@ function usageBadgeColor(pct: number): string {
     return 'text-emerald-400';
 }
 
+/** Get the Monday of the week for a given date */
+function getStartMonday(d: Date): Date {
+    const day = d.getDay(); // 0 = Sun, 1 = Mon ...
+    const result = new Date(d);
+    // If Sunday(0), go back 6 days to prev Mon. If Sat(6), go back 5. 
+    // Generally: if j > 0, go back (j-1). If j=0, go back 6.
+    const diff = day === 0 ? 6 : day - 1;
+    result.setDate(d.getDate() - diff);
+    result.setHours(12, 0, 0, 0);
+    return result;
+}
+
+/** Get the next 21 calendar days starting from a specific Monday */
+function get3WeeksDates(startMonday: Date): Date[] {
+    const dates: Date[] = [];
+    for (let i = 0; i < 21; i++) {
+        dates.push(addDays(startMonday, i));
+    }
+    return dates;
+}
+
 export default function CapacityPlanner() {
     const { currentUserState } = useAppState();
     const { campaigns, accounts } = currentUserState;
@@ -123,8 +144,8 @@ export default function CapacityPlanner() {
         return d;
     }, []);
 
-    const weekdays = useMemo(() => getNext3WeeksWeekdays(today), []);
-    const windowISO = useMemo(() => weekdays.map(toISO), [weekdays]);
+    const startMonday = useMemo(() => getStartMonday(today), [today]);
+    const allDates = useMemo(() => get3WeeksDates(startMonday), [startMonday]);
 
     // Map accountId -> dailyLimit for fast lookup
     const accountLimitMap = useMemo(() => {
@@ -133,59 +154,141 @@ export default function CapacityPlanner() {
         return m;
     }, [accounts]);
 
-    // Build daily capacity data
+    // GLOBAL SIMULATION
     const dailyData: DailyCapacity[] = useMemo(() => {
-        return weekdays.map((date, i) => {
-            const iso = windowISO[i];
+        // State for simulation
+        const pendingEmails = new Map<string, number>(); // campaignId -> remaining emails to send
+        const campaignSequences = new Map<string, number>(); // campaignId -> current sequence index
+        const campaignNextSendDate = new Map<string, string>(); // campaignId -> ISO date of next allowed sequence start
+
+        // Initialize campaign states
+        campaigns.forEach(c => {
+            pendingEmails.set(c.id, 0);
+            campaignSequences.set(c.id, 1);
+            const firstDate = nextSendDay(new Date(c.startDate + 'T12:00:00'), c.sendDays);
+            if (firstDate) campaignNextSendDate.set(c.id, toISO(firstDate));
+        });
+
+        const simulationResults: DailyCapacity[] = [];
+
+        // We simulate day by day for the 3-week window
+        allDates.forEach(date => {
+            const iso = toISO(date);
             const jsD = jsDay(date);
             const dayName = WEEKDAY_NAMES[jsD] as SendDay;
+            const isSendDayForAny = isWeekday(date);
 
-            // Total account capacity: sum of accounts that are used by ANY campaign
-            // that sends on this day. If no campaigns, show total of all accounts.
-            const campaignsSendingToday = campaigns.filter(c => c.sendDays.includes(dayName));
+            const campaignBreakdown: DailyCapacity['campaignBreakdown'] = [];
+            let totalEmailsRequestedToday = 0;
+
+            // Total account capacity for TODAY
+            // Sum of accounts used by ANY campaign active today
             const accountsUsedToday = new Set<string>();
-            campaignsSendingToday.forEach(c => c.emailAccountIds.forEach(id => accountsUsedToday.add(id)));
+            campaigns.forEach(c => {
+                if (c.sendDays.includes(dayName)) {
+                    c.emailAccountIds.forEach(id => accountsUsedToday.add(id));
+                }
+            });
 
             let totalAccountCapacity: number;
-            if (campaigns.length === 0) {
-                totalAccountCapacity = accounts.reduce((s, a) => s + a.dailyLimit, 0);
+            if (accounts.length === 0) {
+                totalAccountCapacity = 0;
             } else if (accountsUsedToday.size === 0) {
-                // Show total capacity even if no accounts specifically assigned
                 totalAccountCapacity = accounts.reduce((s, a) => s + a.dailyLimit, 0);
             } else {
                 totalAccountCapacity = [...accountsUsedToday].reduce((s, id) => s + (accountLimitMap.get(id) ?? 0), 0);
             }
 
-            // Per-campaign demand for this date
-            const campaignBreakdown: DailyCapacity['campaignBreakdown'] = [];
-            let totalDemand = 0;
+            if (isSendDayForAny) {
+                // 1. Process new sequences arriving today
+                campaigns.forEach(c => {
+                    if (campaignNextSendDate.get(c.id) === iso) {
+                        const activeLeads = Math.max(0, c.leads - c.bounces - c.replies);
+                        // Add full sequence batch to pending emails
+                        pendingEmails.set(c.id, (pendingEmails.get(c.id) ?? 0) + activeLeads);
 
-            campaigns.forEach(c => {
-                const schedule = computeCampaignSchedule(c, windowISO);
-                const demand = schedule.get(iso) ?? 0;
-                if (demand > 0) {
-                    campaignBreakdown.push({ campaignId: c.id, campaignName: c.name, demand });
-                    totalDemand += demand;
-                }
-            });
+                        // Schedule next sequence
+                        const currentSeq = campaignSequences.get(c.id) ?? 1;
+                        if (currentSeq < c.sequences) {
+                            const nextDate = nextSequenceDate(date, c.nextMessageDays, c.sendDays);
+                            if (nextDate) {
+                                campaignSequences.set(c.id, currentSeq + 1);
+                                campaignNextSendDate.set(c.id, toISO(nextDate));
+                            }
+                        } else {
+                            campaignNextSendDate.delete(c.id);
+                        }
+                    }
+                });
 
-            const usagePercent = totalAccountCapacity > 0
-                ? Math.round((totalDemand / totalAccountCapacity) * 100)
-                : totalDemand > 0 ? 100 : 0;
+                // 2. Identify how many emails each campaign WANTS to send today
+                // Each campaign is limited by its own dailyMaxEmails AND its pendingEmails
+                const campaignRequests: { id: string, name: string, amount: number }[] = [];
+                campaigns.forEach(c => {
+                    const pending = pendingEmails.get(c.id) ?? 0;
+                    if (pending > 0 && c.sendDays.includes(dayName)) {
+                        const amount = Math.min(pending, c.dailyMaxEmails);
+                        campaignRequests.push({ id: c.id, name: c.name, amount });
+                        totalEmailsRequestedToday += amount;
+                    }
+                });
 
-            return {
-                date: iso,
-                dayLabel: date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
-                totalAccountCapacity,
-                totalEmailDemand: totalDemand,
-                usagePercent,
-                campaignBreakdown,
-            };
+                // 3. Handle Capacity - If total > capacity, scale down
+                const scaleFactor = totalAccountCapacity > 0 && totalEmailsRequestedToday > totalAccountCapacity
+                    ? totalAccountCapacity / totalEmailsRequestedToday
+                    : 1;
+
+                let totalSentToday = 0;
+                campaignRequests.forEach(req => {
+                    const sent = Math.floor(req.amount * scaleFactor);
+                    if (sent > 0) {
+                        campaignBreakdown.push({ campaignId: req.id, campaignName: req.name, demand: sent });
+                        totalSentToday += sent;
+                        // Deduct from pendingEmails
+                        pendingEmails.set(req.id, (pendingEmails.get(req.id) ?? 0) - sent);
+                    }
+                });
+
+                const usagePercent = totalAccountCapacity > 0
+                    ? Math.round((totalSentToday / totalAccountCapacity) * 100)
+                    : totalSentToday > 0 ? 100 : 0;
+
+                simulationResults.push({
+                    date: iso,
+                    dayLabel: date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
+                    totalAccountCapacity,
+                    totalEmailDemand: totalSentToday,
+                    usagePercent,
+                    campaignBreakdown,
+                });
+            } else {
+                // Weekend - no sending, skip result object? 
+                // The grid expects 15-21 days. We include weekends for UI consistency but mark them empty.
+                simulationResults.push({
+                    date: iso,
+                    dayLabel: date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
+                    totalAccountCapacity: 0,
+                    totalEmailDemand: 0,
+                    usagePercent: 0,
+                    campaignBreakdown: [],
+                });
+            }
         });
-    }, [weekdays, windowISO, campaigns, accounts, accountLimitMap]);
 
-    // Group into 3 weeks of 5 days
-    const weeks = [dailyData.slice(0, 5), dailyData.slice(5, 10), dailyData.slice(10, 15)];
+        return simulationResults;
+    }, [allDates, campaigns, accounts, accountLimitMap]);
+
+    // Group into 3 weeks of 7 days (including weekends) or filter to 5 days?
+    // User wants "start with monday and finish with friday". 
+    // Filtering weekends from the display grid:
+    const displayGrid = useMemo(() => {
+        const weeks: DailyCapacity[][] = [];
+        for (let i = 0; i < 3; i++) {
+            const start = i * 7;
+            weeks.push(dailyData.slice(start, start + 5)); // Mon-Fri
+        }
+        return weeks;
+    }, [dailyData]);
 
     const hasAnyDemand = dailyData.some(d => d.totalEmailDemand > 0);
 
@@ -208,7 +311,7 @@ export default function CapacityPlanner() {
 
                 {/* Calendar grid - 3 rows of 5 */}
                 <div className="space-y-3">
-                    {weeks.map((week, wi) => (
+                    {displayGrid.map((week, wi) => (
                         <div key={wi} className="grid grid-cols-5 gap-3">
                             {week.map((day) => (
                                 <div
