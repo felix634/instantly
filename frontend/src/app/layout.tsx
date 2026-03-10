@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-import { UserProvider } from "@/context/UserContext";
+import { AppStateProvider } from "@/context/UserContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Instantly Campaign Monitor",
-  description: "Optimize your email outreach speed and capacity.",
+  title: "Campaign Planner",
+  description: "Manual email campaign capacity planner for Mon–Fri scheduling.",
 };
 
 export default function RootLayout({
@@ -29,9 +29,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <UserProvider>
+        <AppStateProvider>
           {children}
-        </UserProvider>
+        </AppStateProvider>
       </body>
     </html>
   );

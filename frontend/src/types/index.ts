@@ -1,53 +1,43 @@
+export type SendDay = 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri';
+
+export interface EmailAccount {
+    id: string;
+    email: string;
+    dailyLimit: number;
+}
+
 export interface Campaign {
     id: string;
     name: string;
-    status: number;
-    dailyLimit: number;
-    totalSent: number;
-    bounceRate: number;
-    replyRate: number;
+    leads: number;
+    dailyMaxEmails: number;
+    sequences: number;
+    sendDays: SendDay[];
+    nextMessageDays: number;
+    bounces: number;
+    replies: number;
+    emailAccountIds: string[];
+    startDate: string; // ISO date string for when the campaign starts sending
 }
 
-export interface HeatmapDay {
-    date: string;
-    sent: number;
-    capacity: number;
-    usage: number;
-}
-
-export interface DashboardMetrics {
-    user: string;
-    metrics: {
-        totalSends: number;
-        totalBounces: number;
-        totalReplies: number;
-        bounceRate: number;
-        replyRate: number;
-        activeCampaignsCount: number;
-        totalCapacity: number;
-        freeCapacity: number;
-        freeCapacityPercentage: number;
-    };
+export interface UserState {
+    accounts: EmailAccount[];
     campaigns: Campaign[];
-    heatmap: HeatmapDay[];
 }
 
-export interface Recommendation {
-    user: string;
-    totalCapacity: number;
-    safeCapacity: number;
-    currentDailyLoad: number;
-    availableDailyVolume: number;
-    recommendation: {
-        suggestedStartDate: string;
-        suggestedVolume: number;
-        estimatedCompletionDays: number;
-    };
+export interface AppState {
+    felix: UserState;
+    arpi: UserState;
 }
 
-export interface Account {
-    id: string;
-    email: string;
-    daily_limit: number;
-    status: number;
+export type UserType = 'felix' | 'arpi';
+
+// Capacity planner output
+export interface DailyCapacity {
+    date: string; // ISO date
+    dayLabel: string; // e.g. "Mon 10 Mar"
+    totalAccountCapacity: number;
+    totalEmailDemand: number;
+    usagePercent: number;
+    campaignBreakdown: { campaignId: string; campaignName: string; demand: number }[];
 }
