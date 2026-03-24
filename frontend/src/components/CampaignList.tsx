@@ -12,6 +12,7 @@ export default function CampaignList() {
     const { campaigns, accounts } = currentUserState;
     const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
     const [showingForm, setShowingForm] = useState(false);
+    const [collapsed, setCollapsed] = useState(true);
 
     const getAccountEmails = (ids: string[]) =>
         ids.map(id => accounts.find(a => a.id === id)?.email?.split('@')[1] ?? '?').join(', ');
@@ -33,16 +34,29 @@ export default function CampaignList() {
     return (
         <div className="p-8 rounded-2xl glass">
             <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-foreground">Campaigns</h2>
                 <button
-                    onClick={() => setShowingForm(true)}
+                    onClick={() => setCollapsed(!collapsed)}
+                    className="flex items-center gap-2 group/toggle"
+                >
+                    <svg
+                        className={`w-4 h-4 text-muted-foreground transition-transform ${collapsed ? '' : 'rotate-90'}`}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+                    >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <h2 className="text-xl font-bold text-foreground">
+                        Campaigns{campaigns.length > 0 && <span className="text-muted-foreground font-medium text-sm ml-2">({campaigns.length})</span>}
+                    </h2>
+                </button>
+                <button
+                    onClick={() => { setShowingForm(true); setCollapsed(false); }}
                     className="px-5 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:bg-primary/80 transition-all shadow-lg shadow-primary/20"
                 >
                     + New Campaign
                 </button>
             </div>
 
-            {campaigns.length === 0 ? (
+            {collapsed ? null : campaigns.length === 0 ? (
                 <div className="py-12 text-center">
                     <p className="text-muted-foreground italic text-sm">No campaigns yet.</p>
                     <p className="text-muted-foreground text-xs mt-1">Add a campaign to start planning capacity.</p>
