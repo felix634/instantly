@@ -3,7 +3,7 @@
 import React from 'react';
 import { useAppState } from '../context/UserContext';
 import AccountsManager from '../components/AccountsManager';
-import CampaignList from '../components/CampaignList';
+import CampaignList, { FinishedCampaigns } from '../components/CampaignList';
 import CapacityPlanner from '../components/CapacityPlanner';
 
 export default function Home() {
@@ -11,7 +11,7 @@ export default function Home() {
   const { accounts, campaigns } = currentUserState;
 
   const totalCapacity = accounts.reduce((s, a) => s + a.dailyLimit, 0);
-  const activeCampaigns = campaigns.length;
+  const activeCampaigns = campaigns.filter(c => !c.finished).length;
 
   if (isLoading) {
     return (
@@ -66,6 +66,9 @@ export default function Home() {
 
         {/* Row 2: Capacity Planner full width */}
         <CapacityPlanner />
+
+        {/* Row 3: Finished Campaigns */}
+        <FinishedCampaigns />
       </div>
     </main>
   );

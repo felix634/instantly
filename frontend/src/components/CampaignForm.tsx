@@ -22,6 +22,7 @@ const emptyForm = (): Omit<Campaign, 'id'> => ({
     replies: 0,
     emailAccountIds: [],
     startDate: new Date().toISOString().split('T')[0],
+    finished: false,
 });
 
 export default function CampaignForm({ editing, onDone }: CampaignFormProps) {

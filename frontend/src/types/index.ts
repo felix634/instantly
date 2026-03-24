@@ -18,6 +18,7 @@ export interface Campaign {
     replies: number;
     emailAccountIds: string[];
     startDate: string; // ISO date string for when the campaign starts sending
+    finished: boolean;
 }
 
 export interface UserState {

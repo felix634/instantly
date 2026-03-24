@@ -91,6 +91,7 @@ export async function updateCampaignInDb(id: string, data: Partial<Omit<Campaign
     if (data.replies !== undefined) dbData.replies = data.replies;
     if (data.emailAccountIds !== undefined) dbData.email_account_ids = data.emailAccountIds;
     if (data.startDate !== undefined) dbData.start_date = data.startDate || null;
+    if (data.finished !== undefined) dbData.finished = data.finished;
 
     const { error } = await supabase.from('cp_campaigns').update(dbData).eq('id', id);
     if (error) throw error;
@@ -125,6 +126,7 @@ function mapCampaignFromDb(row: any): Campaign {
         replies: row.replies,
         emailAccountIds: row.email_account_ids || [],
         startDate: row.start_date || '',
+        finished: row.finished || false,
     };
 }
 
@@ -142,6 +144,7 @@ function mapCampaignToDb(userId: string, c: Campaign) {
         replies: c.replies,
         email_account_ids: c.emailAccountIds,
         start_date: c.startDate || null,
+        finished: c.finished || false,
     };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

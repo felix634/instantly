@@ -136,7 +136,8 @@ function get3WeeksDates(startMonday: Date): Date[] {
 
 export default function CapacityPlanner() {
     const { currentUserState } = useAppState();
-    const { campaigns, accounts } = currentUserState;
+    const { campaigns: allCampaigns, accounts } = currentUserState;
+    const campaigns = allCampaigns.filter(c => !c.finished);
 
     const today = useMemo(() => {
         const d = new Date();
