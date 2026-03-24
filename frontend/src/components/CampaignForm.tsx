@@ -190,7 +190,20 @@ export default function CampaignForm({ editing, onDone }: CampaignFormProps) {
             {/* Email Accounts */}
             {accounts.length > 0 && (
                 <div className="space-y-2">
-                    <label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Email Accounts</label>
+                    <div className="flex items-center justify-between">
+                        <label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Email Accounts</label>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const allIds = accounts.map(a => a.id);
+                                const allSelected = allIds.every(id => form.emailAccountIds.includes(id));
+                                setForm(f => ({ ...f, emailAccountIds: allSelected ? [] : allIds }));
+                            }}
+                            className="text-xs font-bold text-primary hover:text-primary/80 transition-colors"
+                        >
+                            {accounts.every(a => form.emailAccountIds.includes(a.id)) ? 'Deselect All' : 'Select All'}
+                        </button>
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {accounts.map(account => (
                             <button
