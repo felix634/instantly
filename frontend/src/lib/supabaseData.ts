@@ -89,6 +89,7 @@ export async function updateCampaignInDb(id: string, data: Partial<Omit<Campaign
     if (data.nextMessageDays !== undefined) dbData.next_message_days = data.nextMessageDays;
     if (data.bounces !== undefined) dbData.bounces = data.bounces;
     if (data.replies !== undefined) dbData.replies = data.replies;
+    if (data.unsubscribed !== undefined) dbData.unsubscribed = data.unsubscribed;
     if (data.emailAccountIds !== undefined) dbData.email_account_ids = data.emailAccountIds;
     if (data.startDate !== undefined) dbData.start_date = data.startDate || null;
     if (data.finished !== undefined) dbData.finished = data.finished;
@@ -124,6 +125,7 @@ function mapCampaignFromDb(row: any): Campaign {
         nextMessageDays: row.next_message_days,
         bounces: row.bounces,
         replies: row.replies,
+        unsubscribed: row.unsubscribed || 0,
         emailAccountIds: row.email_account_ids || [],
         startDate: row.start_date || '',
         finished: row.finished || false,
@@ -142,6 +144,7 @@ function mapCampaignToDb(userId: string, c: Campaign) {
         next_message_days: c.nextMessageDays,
         bounces: c.bounces,
         replies: c.replies,
+        unsubscribed: c.unsubscribed,
         email_account_ids: c.emailAccountIds,
         start_date: c.startDate || null,
         finished: c.finished || false,

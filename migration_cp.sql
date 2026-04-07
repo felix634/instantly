@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS cp_campaigns (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 3b. Add unsubscribed column (run if table already exists)
+ALTER TABLE cp_campaigns ADD COLUMN IF NOT EXISTS unsubscribed INTEGER NOT NULL DEFAULT 0;
+
 -- 4. Enable RLS with permissive policies (no auth needed)
 ALTER TABLE cp_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cp_campaigns ENABLE ROW LEVEL SECURITY;

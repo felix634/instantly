@@ -140,7 +140,7 @@ function CampaignCard({
     onFinish?: () => void;
     onReactivate?: () => void;
 }) {
-    const active = Math.max(0, c.leads - c.bounces - c.replies);
+    const active = Math.max(0, c.leads - c.bounces - c.replies - c.unsubscribed);
 
     return (
         <div className="rounded-xl bg-background/30 border border-border group hover:border-primary/30 transition-all">
@@ -206,11 +206,12 @@ function CampaignCard({
                     </p>
 
                     {/* Stats row */}
-                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
+                    <div className="grid grid-cols-4 sm:grid-cols-7 gap-3 text-center">
                         <Stat label="Leads" value={c.leads.toLocaleString()} />
                         <Stat label="Active" value={active.toLocaleString()} highlight />
                         <Stat label="Bounces" value={c.bounces} dim={c.bounces === 0} />
                         <Stat label="Replies" value={c.replies} dim={c.replies === 0} />
+                        <Stat label="Unsub" value={c.unsubscribed} dim={c.unsubscribed === 0} />
                         <Stat label="Max/Day" value={c.dailyMaxEmails} />
                         <Stat label="Sequences" value={c.sequences} />
                     </div>

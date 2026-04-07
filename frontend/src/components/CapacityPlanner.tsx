@@ -68,7 +68,7 @@ function computeCampaignSchedule(
 ): Map<string, number> {
     const result = new Map<string, number>();
     const windowSet = new Set(windowDates);
-    const activeLeads = Math.max(0, campaign.leads - campaign.bounces - campaign.replies);
+    const activeLeads = Math.max(0, campaign.leads - campaign.bounces - campaign.replies - campaign.unsubscribed);
     if (activeLeads === 0 || campaign.sendDays.length === 0) return result;
 
     const startDate = new Date(campaign.startDate + 'T12:00:00');
@@ -217,7 +217,7 @@ export default function CapacityPlanner() {
                 // Process new sequences arriving today
                 campaigns.forEach(c => {
                     if (campaignNextSendDate.get(c.id) === iso) {
-                        const activeLeads = Math.max(0, c.leads - c.bounces - c.replies);
+                        const activeLeads = Math.max(0, c.leads - c.bounces - c.replies - c.unsubscribed);
                         pendingEmails.set(c.id, (pendingEmails.get(c.id) ?? 0) + activeLeads);
 
                         const currentSeq = campaignSequences.get(c.id) ?? 1;

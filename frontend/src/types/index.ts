@@ -16,6 +16,7 @@ export interface Campaign {
     nextMessageDays: number;
     bounces: number;
     replies: number;
+    unsubscribed: number;
     emailAccountIds: string[];
     startDate: string; // ISO date string for when the campaign starts sending
     finished: boolean;

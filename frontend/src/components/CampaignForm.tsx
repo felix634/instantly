@@ -20,6 +20,7 @@ const emptyForm = (): Omit<Campaign, 'id'> => ({
     nextMessageDays: 3,
     bounces: 0,
     replies: 0,
+    unsubscribed: 0,
     emailAccountIds: [],
     startDate: new Date().toISOString().split('T')[0],
     finished: false,
@@ -65,7 +66,7 @@ export default function CampaignForm({ editing, onDone }: CampaignFormProps) {
     };
 
     const num = (val: string) => Math.max(0, parseInt(val) || 0);
-    const activeleads = Math.max(0, form.leads - form.bounces - form.replies);
+    const activeleads = Math.max(0, form.leads - form.bounces - form.replies - form.unsubscribed);
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -92,8 +93,8 @@ export default function CampaignForm({ editing, onDone }: CampaignFormProps) {
                 </div>
             </div>
 
-            {/* Leads / Bounces / Replies */}
-            <div className="grid grid-cols-3 gap-4">
+            {/* Leads / Bounces / Replies / Unsubscribed */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="space-y-1.5">
                     <label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Total Leads</label>
                     <input
@@ -123,6 +124,16 @@ export default function CampaignForm({ editing, onDone }: CampaignFormProps) {
                         placeholder="0"
                     />
                 </div>
+                <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Unsubscribed</label>
+                    <input
+                        type="number" min={0}
+                        value={form.unsubscribed || ''}
+                        onChange={e => setForm(f => ({ ...f, unsubscribed: num(e.target.value) }))}
+                        className="w-full px-4 py-2.5 rounded-xl bg-background/50 border border-border text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all text-center"
+                        placeholder="0"
+                    />
+                </div>
             </div>
 
             {/* Active leads indicator */}
@@ -130,7 +141,7 @@ export default function CampaignForm({ editing, onDone }: CampaignFormProps) {
                 <span className="w-2 h-2 rounded-full bg-emerald-400" />
                 <span className="text-sm text-emerald-400 font-medium">
                     Active leads: <strong>{activeleads.toLocaleString()}</strong>
-                    <span className="text-muted-foreground font-normal ml-1">({form.leads} − {form.bounces} bounces − {form.replies} replies)</span>
+                    <span className="text-muted-foreground font-normal ml-1">({form.leads} − {form.bounces} bounces − {form.replies} replies − {form.unsubscribed} unsub)</span>
                 </span>
             </div>
 
