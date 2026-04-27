@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAppState } from '../context/UserContext';
 import { Campaign, SendDay } from '../types';
+import { tagColorClass } from './AccountsManager';
 
 const ALL_DAYS: SendDay[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
@@ -24,17 +25,25 @@ const emptyForm = (): Omit<Campaign, 'id'> => ({
     emailAccountIds: [],
     startDate: new Date().toISOString().split('T')[0],
     finished: false,
+    pausedWeeks: [],
 });
 
 export default function CampaignForm({ editing, onDone }: CampaignFormProps) {
     const { currentUserState, addCampaign, updateCampaign } = useAppState();
-    const { accounts } = currentUserState;
+    const { accounts, tags } = currentUserState;
 
     const [form, setForm] = useState<Omit<Campaign, 'id'>>(editing ? { ...editing } : emptyForm());
 
     useEffect(() => {
         setForm(editing ? { ...editing } : emptyForm());
     }, [editing]);
+
+    // Tag → accounts that have it
+    const accountsByTag = useMemo(() => {
+        const map = new Map<string, string[]>();
+        tags.forEach(t => map.set(t.id, accounts.filter(a => a.tagIds.includes(t.id)).map(a => a.id)));
+        return map;
+    }, [tags, accounts]);
 
     const toggleDay = (day: SendDay) => {
         setForm(f => ({
@@ -52,6 +61,18 @@ export default function CampaignForm({ editing, onDone }: CampaignFormProps) {
                 ? f.emailAccountIds.filter(a => a !== id)
                 : [...f.emailAccountIds, id],
         }));
+    };
+
+    const toggleTag = (tagId: string) => {
+        const tagAccountIds = accountsByTag.get(tagId) || [];
+        if (tagAccountIds.length === 0) return;
+        setForm(f => {
+            const allSelected = tagAccountIds.every(id => f.emailAccountIds.includes(id));
+            const next = allSelected
+                ? f.emailAccountIds.filter(id => !tagAccountIds.includes(id))
+                : Array.from(new Set([...f.emailAccountIds, ...tagAccountIds]));
+            return { ...f, emailAccountIds: next };
+        });
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -215,6 +236,41 @@ export default function CampaignForm({ editing, onDone }: CampaignFormProps) {
                             {accounts.every(a => form.emailAccountIds.includes(a.id)) ? 'Deselect All' : 'Select All'}
                         </button>
                     </div>
+
+                    {/* Tag quick-pick */}
+                    {tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 p-3 rounded-xl bg-background/30 border border-border">
+                            <span className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground self-center mr-1">By tag:</span>
+                            {tags.map(tag => {
+                                const tagAccountIds = accountsByTag.get(tag.id) || [];
+                                if (tagAccountIds.length === 0) {
+                                    return (
+                                        <span
+                                            key={tag.id}
+                                            className={`px-2.5 py-1 rounded-md border text-[11px] font-bold opacity-30 ${tagColorClass(tag.color)}`}
+                                            title="No accounts assigned to this tag"
+                                        >
+                                            {tag.name} <span className="font-normal opacity-60">0</span>
+                                        </span>
+                                    );
+                                }
+                                const allOn = tagAccountIds.every(id => form.emailAccountIds.includes(id));
+                                const someOn = !allOn && tagAccountIds.some(id => form.emailAccountIds.includes(id));
+                                return (
+                                    <button
+                                        key={tag.id}
+                                        type="button"
+                                        onClick={() => toggleTag(tag.id)}
+                                        className={`px-2.5 py-1 rounded-md border text-[11px] font-bold transition-all ${tagColorClass(tag.color, allOn || someOn)} ${allOn ? 'ring-1 ring-foreground/40' : someOn ? 'ring-1 ring-foreground/20' : 'opacity-60 hover:opacity-100'}`}
+                                        title={allOn ? 'Deselect all in this tag' : 'Select all in this tag'}
+                                    >
+                                        {tag.name} <span className="font-normal opacity-70">{tagAccountIds.length}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {accounts.map(account => (
                             <button
@@ -235,6 +291,19 @@ export default function CampaignForm({ editing, onDone }: CampaignFormProps) {
                                     )}
                                 </div>
                                 <span className="truncate flex-1">{account.email}</span>
+                                {account.tagIds.length > 0 && (
+                                    <span className="flex gap-1 flex-shrink-0">
+                                        {account.tagIds.slice(0, 2).map(tid => {
+                                            const tag = tags.find(t => t.id === tid);
+                                            if (!tag) return null;
+                                            return (
+                                                <span key={tid} className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${tagColorClass(tag.color)}`}>
+                                                    {tag.name}
+                                                </span>
+                                            );
+                                        })}
+                                    </span>
+                                )}
                                 <span className="text-xs font-bold text-primary whitespace-nowrap">{account.dailyLimit}/d</span>
                             </button>
                         ))}

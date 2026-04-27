@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { AppState, UserState, UserType, EmailAccount, Campaign } from '../types';
+import { AppState, UserState, UserType, EmailAccount, Campaign, AccountTag } from '../types';
 import { supabase } from '../lib/supabase';
 import {
     getUserIds,
@@ -13,6 +13,9 @@ import {
     insertCampaign,
     updateCampaignInDb,
     deleteCampaignFromDb,
+    insertTag,
+    updateTagInDb,
+    deleteTagFromDb,
 } from '../lib/supabaseData';
 
 interface AppStateContextType {
@@ -27,9 +30,12 @@ interface AppStateContextType {
     addCampaign: (campaign: Omit<Campaign, 'id'>) => void;
     updateCampaign: (id: string, data: Partial<Omit<Campaign, 'id'>>) => void;
     deleteCampaign: (id: string) => void;
+    addTag: (tag: Omit<AccountTag, 'id'>) => void;
+    updateTag: (id: string, data: Partial<Omit<AccountTag, 'id'>>) => void;
+    deleteTag: (id: string) => void;
 }
 
-const emptyUserState = (): UserState => ({ accounts: [], campaigns: [] });
+const emptyUserState = (): UserState => ({ accounts: [], campaigns: [], tags: [] });
 
 const defaultState: AppState = {
     felix: emptyUserState(),
@@ -107,6 +113,9 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 handleRealtimeChange(payload);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'cp_campaigns' }, (payload) => {
+                handleRealtimeChange(payload);
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'cp_account_tags' }, (payload) => {
                 handleRealtimeChange(payload);
             })
             .subscribe();
@@ -271,12 +280,79 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         });
     }, [user]);
 
+    // --- Tag mutations ---
+    const addTag = useCallback((tag: Omit<AccountTag, 'id'>) => {
+        const id = crypto.randomUUID();
+        const newTag: AccountTag = { ...tag, id };
+
+        setState(prev => ({
+            ...prev,
+            [user]: { ...prev[user], tags: [...prev[user].tags, newTag] },
+        }));
+
+        pendingMutationsRef.current.add(id);
+        insertTag(getCurrentUserId(), newTag).catch(err => {
+            console.error('Failed to insert tag:', err);
+            pendingMutationsRef.current.delete(id);
+        });
+    }, [user, getCurrentUserId]);
+
+    const updateTag = useCallback((id: string, data: Partial<Omit<AccountTag, 'id'>>) => {
+        setState(prev => ({
+            ...prev,
+            [user]: {
+                ...prev[user],
+                tags: prev[user].tags.map(t => t.id === id ? { ...t, ...data } : t),
+            },
+        }));
+
+        pendingMutationsRef.current.add(id);
+        updateTagInDb(id, data).catch(err => {
+            console.error('Failed to update tag:', err);
+            pendingMutationsRef.current.delete(id);
+        });
+    }, [user]);
+
+    const deleteTag = useCallback((id: string) => {
+        // Strip this tag from any account that references it
+        setState(prev => ({
+            ...prev,
+            [user]: {
+                ...prev[user],
+                tags: prev[user].tags.filter(t => t.id !== id),
+                accounts: prev[user].accounts.map(a => ({
+                    ...a,
+                    tagIds: a.tagIds.filter(tid => tid !== id),
+                })),
+            },
+        }));
+
+        pendingMutationsRef.current.add(id);
+        deleteTagFromDb(id).catch(err => {
+            console.error('Failed to delete tag:', err);
+            pendingMutationsRef.current.delete(id);
+        });
+
+        // Persist tag removal on affected accounts
+        setState(prev => {
+            const affected = prev[user].accounts.filter(a => a.tagIds.includes(id));
+            for (const a of affected) {
+                const newTagIds = a.tagIds.filter(tid => tid !== id);
+                updateAccountInDb(a.id, { tagIds: newTagIds }).catch(err => {
+                    console.error('Failed to clean up tag on account:', err);
+                });
+            }
+            return prev;
+        });
+    }, [user]);
+
     return (
         <AppStateContext.Provider value={{
             user, setUser, state, isLoading,
             currentUserState: state[user],
             addAccount, updateAccount, deleteAccount,
             addCampaign, updateCampaign, deleteCampaign,
+            addTag, updateTag, deleteTag,
         }}>
             {children}
         </AppStateContext.Provider>
@@ -307,7 +383,7 @@ async function migrateFromLocalStorage(appState: AppState, ids: Record<UserType,
         for (const acc of us.accounts) {
             const newId = crypto.randomUUID();
             oldToNewId[acc.id] = newId;
-            await insertAccount(userId, { ...acc, id: newId });
+            await insertAccount(userId, { ...acc, id: newId, tagIds: [] });
         }
 
         // Migrate campaigns with remapped account IDs
@@ -320,6 +396,7 @@ async function migrateFromLocalStorage(appState: AppState, ids: Record<UserType,
                 ...camp,
                 id: newId,
                 emailAccountIds: remappedAccountIds,
+                pausedWeeks: [],
             });
         }
     }

@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { UserType, UserState, EmailAccount, Campaign } from '../types';
+import type { UserType, UserState, EmailAccount, Campaign, AccountTag } from '../types';
 
 // Cache user UUID mapping
 let userIdCache: Record<UserType, string> | null = null;
@@ -32,18 +32,21 @@ export function getUserTypeByUUID(uuid: string): UserType | null {
 // --- Fetch ---
 
 export async function fetchUserState(userId: string): Promise<UserState> {
-    const [accountsRes, campaignsRes] = await Promise.all([
+    const [accountsRes, campaignsRes, tagsRes] = await Promise.all([
         supabase.from('cp_accounts').select('*').eq('user_id', userId),
         supabase.from('cp_campaigns').select('*').eq('user_id', userId),
+        supabase.from('cp_account_tags').select('*').eq('user_id', userId),
     ]);
 
     if (accountsRes.error) throw accountsRes.error;
     if (campaignsRes.error) throw campaignsRes.error;
+    if (tagsRes.error) throw tagsRes.error;
 
     const accounts: EmailAccount[] = (accountsRes.data || []).map(mapAccountFromDb);
     const campaigns: Campaign[] = (campaignsRes.data || []).map(mapCampaignFromDb);
+    const tags: AccountTag[] = (tagsRes.data || []).map(mapTagFromDb);
 
-    return { accounts, campaigns };
+    return { accounts, campaigns, tags };
 }
 
 // --- Accounts ---
@@ -54,6 +57,7 @@ export async function insertAccount(userId: string, account: EmailAccount) {
         user_id: userId,
         email: account.email,
         daily_limit: account.dailyLimit,
+        tag_ids: account.tagIds,
     });
     if (error) throw error;
 }
@@ -62,6 +66,7 @@ export async function updateAccountInDb(id: string, data: Partial<Omit<EmailAcco
     const dbData: Record<string, unknown> = {};
     if (data.email !== undefined) dbData.email = data.email;
     if (data.dailyLimit !== undefined) dbData.daily_limit = data.dailyLimit;
+    if (data.tagIds !== undefined) dbData.tag_ids = data.tagIds;
 
     const { error } = await supabase.from('cp_accounts').update(dbData).eq('id', id);
     if (error) throw error;
@@ -93,6 +98,7 @@ export async function updateCampaignInDb(id: string, data: Partial<Omit<Campaign
     if (data.emailAccountIds !== undefined) dbData.email_account_ids = data.emailAccountIds;
     if (data.startDate !== undefined) dbData.start_date = data.startDate || null;
     if (data.finished !== undefined) dbData.finished = data.finished;
+    if (data.pausedWeeks !== undefined) dbData.paused_weeks = data.pausedWeeks;
 
     const { error } = await supabase.from('cp_campaigns').update(dbData).eq('id', id);
     if (error) throw error;
@@ -100,6 +106,31 @@ export async function updateCampaignInDb(id: string, data: Partial<Omit<Campaign
 
 export async function deleteCampaignFromDb(id: string) {
     const { error } = await supabase.from('cp_campaigns').delete().eq('id', id);
+    if (error) throw error;
+}
+
+// --- Tags ---
+
+export async function insertTag(userId: string, tag: AccountTag) {
+    const { error } = await supabase.from('cp_account_tags').insert({
+        id: tag.id,
+        user_id: userId,
+        name: tag.name,
+        color: tag.color,
+    });
+    if (error) throw error;
+}
+
+export async function updateTagInDb(id: string, data: Partial<Omit<AccountTag, 'id'>>) {
+    const dbData: Record<string, unknown> = {};
+    if (data.name !== undefined) dbData.name = data.name;
+    if (data.color !== undefined) dbData.color = data.color;
+    const { error } = await supabase.from('cp_account_tags').update(dbData).eq('id', id);
+    if (error) throw error;
+}
+
+export async function deleteTagFromDb(id: string) {
+    const { error } = await supabase.from('cp_account_tags').delete().eq('id', id);
     if (error) throw error;
 }
 
@@ -111,6 +142,7 @@ function mapAccountFromDb(row: any): EmailAccount {
         id: row.id,
         email: row.email,
         dailyLimit: row.daily_limit,
+        tagIds: row.tag_ids || [],
     };
 }
 
@@ -129,6 +161,7 @@ function mapCampaignFromDb(row: any): Campaign {
         emailAccountIds: row.email_account_ids || [],
         startDate: row.start_date || '',
         finished: row.finished || false,
+        pausedWeeks: row.paused_weeks || [],
     };
 }
 
@@ -148,6 +181,15 @@ function mapCampaignToDb(userId: string, c: Campaign) {
         email_account_ids: c.emailAccountIds,
         start_date: c.startDate || null,
         finished: c.finished || false,
+        paused_weeks: c.pausedWeeks || [],
+    };
+}
+
+function mapTagFromDb(row: any): AccountTag {
+    return {
+        id: row.id,
+        name: row.name,
+        color: row.color || 'primary',
     };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

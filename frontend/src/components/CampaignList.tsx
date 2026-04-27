@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAppState } from '../context/UserContext';
 import { Campaign } from '../types';
 import CampaignForm from './CampaignForm';
+import { addDays, getMonday, mondayISO, toISODate } from '../lib/weekUtils';
 
 const DAY_LABELS = { Mon: 'M', Tue: 'T', Wed: 'W', Thu: 'T', Fri: 'F' };
 
@@ -70,6 +71,7 @@ export default function CampaignList() {
                             onEdit={() => setEditingCampaign(c)}
                             onDelete={() => deleteCampaign(c.id)}
                             onFinish={() => updateCampaign(c.id, { finished: true })}
+                            onUpdate={(data) => updateCampaign(c.id, data)}
                         />
                     ))}
                 </div>
@@ -114,11 +116,22 @@ export function FinishedCampaigns() {
                         getAccountEmails={getAccountEmails}
                         onDelete={() => deleteCampaign(c.id)}
                         onReactivate={() => updateCampaign(c.id, { finished: false })}
+                        onUpdate={(data) => updateCampaign(c.id, data)}
                     />
                 ))}
             </div>
         </div>
     );
+}
+
+function formatWeekRange(monday: Date): string {
+    const fri = addDays(monday, 4);
+    const sameMonth = monday.getMonth() === fri.getMonth();
+    const m = monday.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    const f = sameMonth
+        ? fri.toLocaleDateString('en-GB', { day: 'numeric' })
+        : fri.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    return `${m}–${f}`;
 }
 
 function CampaignCard({
@@ -130,6 +143,7 @@ function CampaignCard({
     onDelete,
     onFinish,
     onReactivate,
+    onUpdate,
 }: {
     campaign: Campaign;
     isExpanded: boolean;
@@ -139,11 +153,37 @@ function CampaignCard({
     onDelete: () => void;
     onFinish?: () => void;
     onReactivate?: () => void;
+    onUpdate: (data: Partial<Omit<Campaign, 'id'>>) => void;
 }) {
     const active = Math.max(0, c.leads - c.bounces - c.replies - c.unsubscribed);
 
+    // Generate the next 4 weeks of Mondays for quick toggling
+    const upcomingWeeks = useMemo(() => {
+        const today = new Date();
+        today.setHours(12, 0, 0, 0);
+        const startMon = getMonday(today);
+        return Array.from({ length: 4 }, (_, i) => addDays(startMon, i * 7));
+    }, []);
+
+    const todayMondayISO = mondayISO(new Date());
+    const isPausedThisWeek = c.pausedWeeks.includes(todayMondayISO);
+
+    const togglePauseWeek = (mondayDate: Date) => {
+        const iso = toISODate(mondayDate);
+        const next = c.pausedWeeks.includes(iso)
+            ? c.pausedWeeks.filter(w => w !== iso)
+            : [...c.pausedWeeks, iso].sort();
+        onUpdate({ pausedWeeks: next });
+    };
+
+    // Sorted paused-weeks (drop entries from the past for display sanity)
+    const visiblePausedWeeks = useMemo(() => {
+        const todayMon = mondayISO(new Date());
+        return [...c.pausedWeeks].filter(w => w >= todayMon).sort();
+    }, [c.pausedWeeks]);
+
     return (
-        <div className="rounded-xl bg-background/30 border border-border group hover:border-primary/30 transition-all">
+        <div className={`rounded-xl bg-background/30 border group hover:border-primary/30 transition-all ${isPausedThisWeek ? 'border-amber-500/40' : 'border-border'}`}>
             {/* Header - always visible */}
             <button
                 onClick={onToggle}
@@ -160,6 +200,16 @@ function CampaignCard({
                     <span className="text-xs text-muted-foreground flex-shrink-0">
                         {active.toLocaleString()} active leads
                     </span>
+                    {isPausedThisWeek && (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/40 text-[10px] font-bold uppercase tracking-wider flex-shrink-0">
+                            ⏸ Paused this week
+                        </span>
+                    )}
+                    {!isPausedThisWeek && visiblePausedWeeks.length > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/80 border border-amber-500/30 text-[10px] font-bold flex-shrink-0">
+                            {visiblePausedWeeks.length} paused week{visiblePausedWeeks.length === 1 ? '' : 's'}
+                        </span>
+                    )}
                 </div>
                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" onClick={e => e.stopPropagation()}>
                     {onReactivate && (
@@ -237,6 +287,64 @@ function CampaignCard({
                             </span>
                         )}
                     </div>
+
+                    {/* Weekly pause controls */}
+                    {!onReactivate && (
+                        <div className="pt-3 border-t border-border/50 space-y-2">
+                            <div className="flex items-center justify-between">
+                                <label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">
+                                    Pause Weeks
+                                </label>
+                                <span className="text-[10px] text-muted-foreground italic">
+                                    Click a week to skip sending. Sequences resume next week.
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {upcomingWeeks.map((mon, i) => {
+                                    const iso = toISODate(mon);
+                                    const paused = c.pausedWeeks.includes(iso);
+                                    const label = i === 0 ? 'This week' : i === 1 ? 'Next week' : formatWeekRange(mon);
+                                    return (
+                                        <button
+                                            key={iso}
+                                            onClick={() => togglePauseWeek(mon)}
+                                            className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${paused
+                                                ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                                                : 'bg-background/40 border-border text-muted-foreground hover:border-amber-500/40 hover:text-amber-400'
+                                                }`}
+                                            title={paused ? `Resume sends for week of ${formatWeekRange(mon)}` : `Pause week of ${formatWeekRange(mon)}`}
+                                        >
+                                            {paused && <span className="mr-1">⏸</span>}
+                                            {label}
+                                            <span className="ml-1.5 opacity-60 font-normal">{formatWeekRange(mon)}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Show any further-out paused weeks (beyond the 4-week quick row) */}
+                            {visiblePausedWeeks.filter(iso => !upcomingWeeks.some(m => toISODate(m) === iso)).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                    <span className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground self-center">Also paused:</span>
+                                    {visiblePausedWeeks
+                                        .filter(iso => !upcomingWeeks.some(m => toISODate(m) === iso))
+                                        .map(iso => {
+                                            const mon = new Date(iso + 'T12:00:00');
+                                            return (
+                                                <button
+                                                    key={iso}
+                                                    onClick={() => togglePauseWeek(mon)}
+                                                    className="px-2 py-1 rounded-md bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[10px] font-bold hover:bg-amber-500/25 transition-colors"
+                                                    title="Click to resume this week"
+                                                >
+                                                    ⏸ {formatWeekRange(mon)} ✕
+                                                </button>
+                                            );
+                                        })}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
         </div>

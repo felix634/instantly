@@ -3,12 +3,16 @@
 import React, { useMemo } from 'react';
 import { useAppState } from '../context/UserContext';
 import { Campaign, DailyCapacity, SendDay } from '../types';
+import { mondayISO, getMonday as getStartMonday } from '../lib/weekUtils';
 
 const WEEKDAY_NAMES = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', '', ''];
 
 /** Returns ISO date string (YYYY-MM-DD) for a Date */
 function toISO(d: Date) {
-    return d.toISOString().split('T')[0];
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
 }
 
 /** Advance a Date by N calendar days */
@@ -54,49 +58,18 @@ function nextSequenceDate(prevDate: Date, nextMessageDays: number, sendDays: Sen
     return nextSendDay(candidate, sendDays);
 }
 
-/**
- * Build a map: isoDate -> demand contributed by this campaign on that date.
- * The demand on a given date = min(dailyMaxEmails, active leads) but only 
- * if a sequence is sending on that date.
- *
- * For simplicity: each sequence sends to ALL active leads on its send date,
- * throttled by dailyMaxEmails. The planner shows total emails sent per day.
- */
-function computeCampaignSchedule(
-    campaign: Campaign,
-    windowDates: string[],
-): Map<string, number> {
-    const result = new Map<string, number>();
-    const windowSet = new Set(windowDates);
-    const activeLeads = Math.max(0, campaign.leads - campaign.bounces - campaign.replies - campaign.unsubscribed);
-    if (activeLeads === 0 || campaign.sendDays.length === 0) return result;
-
-    const startDate = new Date(campaign.startDate + 'T12:00:00');
-    let seqDate = nextSendDay(startDate, campaign.sendDays);
-
-    for (let seq = 1; seq <= campaign.sequences; seq++) {
-        if (!seqDate) break;
-        const iso = toISO(seqDate);
-        if (windowSet.has(iso)) {
-            const demand = Math.min(campaign.dailyMaxEmails, activeLeads);
-            result.set(iso, (result.get(iso) ?? 0) + demand);
-        }
-        if (seq < campaign.sequences) {
-            seqDate = nextSequenceDate(seqDate, campaign.nextMessageDays, campaign.sendDays);
-        }
-    }
-    return result;
+/** Is a campaign paused for the week containing `d`? */
+function isPausedOn(c: Campaign, d: Date): boolean {
+    return c.pausedWeeks.includes(mondayISO(d));
 }
 
-/** Get the next 15 weekdays (Mon-Fri) starting from today */
-function getNext3WeeksWeekdays(today: Date): Date[] {
-    const days: Date[] = [];
-    let d = new Date(today);
-    while (days.length < 15) {
-        if (isWeekday(d)) days.push(new Date(d));
-        d = addDays(d, 1);
+/** Get the next 21 calendar days starting from a specific Monday */
+function get3WeeksDates(startMonday: Date): Date[] {
+    const dates: Date[] = [];
+    for (let i = 0; i < 21; i++) {
+        dates.push(addDays(startMonday, i));
     }
-    return days;
+    return dates;
 }
 
 function usageColor(pct: number): string {
@@ -111,27 +84,6 @@ function usageBadgeColor(pct: number): string {
     if (pct >= 90) return 'text-red-400';
     if (pct >= 70) return 'text-orange-400';
     return 'text-emerald-400';
-}
-
-/** Get the Monday of the week for a given date */
-function getStartMonday(d: Date): Date {
-    const day = d.getDay(); // 0 = Sun, 1 = Mon ...
-    const result = new Date(d);
-    // If Sunday(0), go back 6 days to prev Mon. If Sat(6), go back 5. 
-    // Generally: if j > 0, go back (j-1). If j=0, go back 6.
-    const diff = day === 0 ? 6 : day - 1;
-    result.setDate(d.getDate() - diff);
-    result.setHours(12, 0, 0, 0);
-    return result;
-}
-
-/** Get the next 21 calendar days starting from a specific Monday */
-function get3WeeksDates(startMonday: Date): Date[] {
-    const dates: Date[] = [];
-    for (let i = 0; i < 21; i++) {
-        dates.push(addDays(startMonday, i));
-    }
-    return dates;
 }
 
 export default function CapacityPlanner() {
@@ -164,7 +116,7 @@ export default function CapacityPlanner() {
             if (d < earliestStart) earliestStart = d;
         });
         // Normalize earliestStart to the Monday of its week to be consistent
-        let simDate = getStartMonday(earliestStart);
+        const simDate = getStartMonday(earliestStart);
         const simEndDate = allDates[allDates.length - 1];
 
         // 2. State for simulation
@@ -196,10 +148,11 @@ export default function CapacityPlanner() {
             const campaignBreakdown: DailyCapacity['campaignBreakdown'] = [];
             let totalEmailsRequestedToday = 0;
 
-            // Total account capacity for TODAY
+            // Total account capacity for TODAY — only count accounts of campaigns that
+            // (a) have today as a send-day, AND (b) are not paused this week.
             const accountsUsedToday = new Set<string>();
             campaigns.forEach(c => {
-                if (c.sendDays.includes(dayName)) {
+                if (c.sendDays.includes(dayName) && !isPausedOn(c, current)) {
                     c.emailAccountIds.forEach(id => accountsUsedToday.add(id));
                 }
             });
@@ -214,7 +167,9 @@ export default function CapacityPlanner() {
             }
 
             if (isSendDayForAny) {
-                // Process new sequences arriving today
+                // Process new sequences arriving today (sequences advance even during pause —
+                // they just won't actually send while paused. Pending stays in the queue and
+                // drains after the pause ends.)
                 campaigns.forEach(c => {
                     if (campaignNextSendDate.get(c.id) === iso) {
                         const activeLeads = Math.max(0, c.leads - c.bounces - c.replies - c.unsubscribed);
@@ -233,9 +188,11 @@ export default function CapacityPlanner() {
                     }
                 });
 
-                // Identify how many emails each campaign WANTS to send today
+                // Identify how many emails each campaign WANTS to send today.
+                // Campaigns paused this week sit out entirely.
                 const campaignRequests: { id: string, name: string, amount: number }[] = [];
                 campaigns.forEach(c => {
+                    if (isPausedOn(c, current)) return;
                     const pending = pendingEmails.get(c.id) ?? 0;
                     if (pending > 0 && c.sendDays.includes(dayName)) {
                         const amount = Math.min(pending, c.dailyMaxEmails);
@@ -299,9 +256,23 @@ export default function CapacityPlanner() {
         return simulationResults;
     }, [allDates, campaigns, accounts, accountLimitMap, today]);
 
+    // Per-week pause flag for the displayed window (for visual hint on grid)
+    const pausedWeekFlags = useMemo(() => {
+        return [0, 1, 2].map(i => {
+            const mondayDate = allDates[i * 7];
+            const monIso = toISO(mondayDate);
+            const fullyPausedCampaigns = campaigns.filter(c => c.pausedWeeks.includes(monIso));
+            return {
+                weekIndex: i,
+                anyPaused: fullyPausedCampaigns.length > 0,
+                allPaused: campaigns.length > 0 && fullyPausedCampaigns.length === campaigns.length,
+                count: fullyPausedCampaigns.length,
+            };
+        });
+    }, [allDates, campaigns]);
 
     // Group into 3 weeks of 7 days (including weekends) or filter to 5 days?
-    // User wants "start with monday and finish with friday". 
+    // User wants "start with monday and finish with friday".
     // Filtering weekends from the display grid:
     const displayGrid = useMemo(() => {
         const weeks: DailyCapacity[][] = [];
@@ -333,32 +304,42 @@ export default function CapacityPlanner() {
 
                 {/* Calendar grid - 3 rows of 5 */}
                 <div className="space-y-3">
-                    {displayGrid.map((week, wi) => (
-                        <div key={wi} className="grid grid-cols-5 gap-3">
-                            {week.map((day) => (
-                                <div
-                                    key={day.date}
-                                    className={`p-4 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all hover:scale-[1.03] cursor-default ${usageColor(day.usagePercent)}`}
-                                    title={`Capacity: ${day.totalAccountCapacity} | Demand: ${day.totalEmailDemand}`}
-                                >
-                                    <span className="text-[10px] font-bold uppercase opacity-80">
-                                        {day.dayLabel.split(' ')[0]}
-                                    </span>
-                                    <span className="text-xs font-medium opacity-70">
-                                        {day.dayLabel.split(' ').slice(1).join(' ')}
-                                    </span>
-                                    <span className="text-2xl font-black mt-1">
-                                        {day.usagePercent > 0 ? `${day.usagePercent}%` : '—'}
-                                    </span>
-                                    {day.totalEmailDemand > 0 && (
-                                        <span className="text-[10px] opacity-60 font-medium">
-                                            {day.totalEmailDemand}/{day.totalAccountCapacity}
-                                        </span>
-                                    )}
+                    {displayGrid.map((week, wi) => {
+                        const flag = pausedWeekFlags[wi];
+                        return (
+                            <div key={wi} className="space-y-1">
+                                {flag.anyPaused && (
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80 px-1">
+                                        ⏸ {flag.count} campaign{flag.count === 1 ? '' : 's'} paused this week
+                                    </p>
+                                )}
+                                <div className="grid grid-cols-5 gap-3">
+                                    {week.map((day) => (
+                                        <div
+                                            key={day.date}
+                                            className={`p-4 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all hover:scale-[1.03] cursor-default ${usageColor(day.usagePercent)}`}
+                                            title={`Capacity: ${day.totalAccountCapacity} | Demand: ${day.totalEmailDemand}`}
+                                        >
+                                            <span className="text-[10px] font-bold uppercase opacity-80">
+                                                {day.dayLabel.split(' ')[0]}
+                                            </span>
+                                            <span className="text-xs font-medium opacity-70">
+                                                {day.dayLabel.split(' ').slice(1).join(' ')}
+                                            </span>
+                                            <span className="text-2xl font-black mt-1">
+                                                {day.usagePercent > 0 ? `${day.usagePercent}%` : '—'}
+                                            </span>
+                                            {day.totalEmailDemand > 0 && (
+                                                <span className="text-[10px] opacity-60 font-medium">
+                                                    {day.totalEmailDemand}/{day.totalAccountCapacity}
+                                                </span>
+                                            )}
+                                        </div>
+                                    ))}
                                 </div>
-                            ))}
-                        </div>
-                    ))}
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
 

@@ -1,9 +1,16 @@
 export type SendDay = 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri';
 
+export interface AccountTag {
+    id: string;
+    name: string;
+    color: string;
+}
+
 export interface EmailAccount {
     id: string;
     email: string;
     dailyLimit: number;
+    tagIds: string[];
 }
 
 export interface Campaign {
@@ -20,11 +27,13 @@ export interface Campaign {
     emailAccountIds: string[];
     startDate: string; // ISO date string for when the campaign starts sending
     finished: boolean;
+    pausedWeeks: string[]; // ISO Monday dates the campaign is paused for
 }
 
 export interface UserState {
     accounts: EmailAccount[];
     campaigns: Campaign[];
+    tags: AccountTag[];
 }
 
 export interface AppState {
